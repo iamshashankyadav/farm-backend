@@ -1,0 +1,19 @@
+# Default: both team leads
+*                         @lakshayg2005 @iamshashankyadav
+
+# Team 2 (website) services
+/services/catalog/        @lakshayg2005 @rohitraghuwanshi07 @Akshats-git
+/services/land/           @lakshayg2005 @rohitraghuwanshi07 @Akshats-git
+/services/media/          @lakshayg2005 @rohitraghuwanshi07 @Akshats-git
+/services/quality/        @lakshayg2005 @rohitraghuwanshi07 @Akshats-git
+
+# Team 1 (apps) services
+/services/order/          @iamshashankyadav @Chetan10R15 @krish1809 @kabeer-m
+/services/logistics/      @iamshashankyadav @Chetan10R15 @krish1809 @kabeer-m
+/services/notification/   @iamshashankyadav @Chetan10R15 @krish1809 @kabeer-m
+
+# Shared: both teams review
+/services/identity/       @lakshayg2005 @iamshashankyadav
+/contracts/               @lakshayg2005 @iamshashankyadav
+/libs/common/             @lakshayg2005 @iamshashankyadav
+/infra/                   @lakshayg2005 @iamshashankyadav
