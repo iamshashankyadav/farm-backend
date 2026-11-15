@@ -53,4 +53,46 @@ docs/                    architecture notes and decisions
 
 ## Getting started
 
-Setup instructions (Docker Compose, uv) are added by the Sprint 1 infrastructure issues.
+The backend is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/): `libs/common` and every
+service are separate packages that share one lockfile (`uv.lock`) and, for local development, one `.venv`.
+
+```bash
+# 1. Install uv: https://docs.astral.sh/uv/getting-started/installation/
+# 2. Install Python 3.12 + all packages (run from the repo root)
+uv sync --all-packages
+
+# 3. Run one service with auto-reload
+uv run --package farm-catalog uvicorn catalog_service.main:app --reload --port 8002
+#    then open http://localhost:8002/docs
+
+# 4. Checks (the same ones CI runs)
+uv run pytest
+uv run ruff check . && uv run ruff format --check .
+uv run mypy libs/common/src services/*/src
+```
+
+| Service | Package | Local port |
+| --- | --- | --- |
+| identity | `identity_service` | 8001 |
+| catalog | `catalog_service` | 8002 |
+| land | `land_service` | 8003 |
+| media | `media_service` | 8004 |
+| quality | `quality_service` | 8005 |
+| order | `order_service` | 8006 |
+| logistics | `logistics_service` | 8007 |
+| notification | `notification_service` | 8008 |
+
+**Adding a dependency to one service:** `uv add --package farm-catalog <library>` (never `pip install`).
+
+Each service has the same layout:
+
+```text
+services/<name>/
+  pyproject.toml           package farm-<name>, depends on farm-common
+  Dockerfile               build from the repo root: docker build -f services/<name>/Dockerfile .
+  alembic.ini, migrations/ migrations run inside the <name> schema only
+  src/<name>_service/      main.py (FastAPI app), db.py (SQLAlchemy Base bound to the schema)
+  tests/
+```
+
+Running everything together with Docker Compose (Postgres + PostGIS, RabbitMQ, Redis, MinIO, Traefik) is added by issue #2.
