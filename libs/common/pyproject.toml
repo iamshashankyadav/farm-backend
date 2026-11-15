@@ -1,0 +1,16 @@
+[project]
+name = "farm-common"
+version = "0.1.0"
+description = "Shared code for all Farm Platform services"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic-settings>=2.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/farm_common"]
