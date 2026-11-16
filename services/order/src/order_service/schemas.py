@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from farm_common.schemas import ApiModel
 
@@ -47,6 +47,13 @@ class OrderType(StrEnum):
     HARVEST = "HARVEST"
 
 
+class HarvestOption(StrEnum):
+    """What a customer does with a graded harvest (HLD section 12)."""
+
+    DELIVERY = "DELIVERY"  # the harvest is delivered to the customer's address (pooled)
+    BUYBACK = "BUYBACK"  # the farmer buys the harvest back and credits the customer
+
+
 class PaymentStatus(StrEnum):
     PENDING = "PENDING"
     SUCCEEDED = "SUCCEEDED"
@@ -56,7 +63,8 @@ class PaymentStatus(StrEnum):
 
 class PaymentKind(StrEnum):
     """What a payment is for (HLD section 10). The land service pays reservation deposits through
-    this API too. REFUND rows are written by the order service, never requested by a client."""
+    this API too. BALANCE and REFUND rows are written by the order service, never requested by a
+    client."""
 
     FULL = "FULL"
     DEPOSIT = "DEPOSIT"
@@ -110,8 +118,8 @@ class OrderItemIn(ApiModel):
 class OrderItem(ApiModel):
     """A line of an order. Name and price are copied from the listing at checkout time."""
 
-    listing_id: UUID
-    farm_id: UUID
+    listing_id: UUID | None = Field(default=None, description="Empty on a harvest order")
+    farm_id: UUID | None = Field(default=None, description="Empty on a harvest order")
     name: str = Field(examples=["Tomato"])
     unit: str = Field(examples=["kg"])
     qty: float
@@ -134,25 +142,53 @@ class OrderEvent(ApiModel):
 class PaymentIntentCreate(ApiModel):
     amount: float = Field(gt=0, examples=[499.0])
     kind: PaymentKind = PaymentKind.FULL
-    # The reservation id for a DEPOSIT or BALANCE payment (V2); not needed for a FULL order payment.
+    # The reservation id: required for a DEPOSIT, not used for a FULL order payment.
     reference_id: UUID | None = None
 
     @field_validator("kind")
     @classmethod
     def _client_kinds(cls, value: PaymentKind) -> PaymentKind:
-        if value == PaymentKind.REFUND:
-            raise ValueError("REFUND payments are created by the order service")
+        if value in (PaymentKind.REFUND, PaymentKind.BALANCE):
+            raise ValueError(f"{value} payments are created by the order service")
         return value
+
+    @model_validator(mode="after")
+    def _deposit_needs_reservation(self) -> "PaymentIntentCreate":
+        if self.kind == PaymentKind.DEPOSIT and self.reference_id is None:
+            raise ValueError("referenceId (the reservation id) is required for a DEPOSIT")
+        return self
 
 
 class PaymentIntent(ApiModel):
-    """A mock payment. In this project it always succeeds unless the amount is a test value."""
+    """A mock payment. In this project it always succeeds unless the amount is a test value.
+
+    A FULL intent stays PENDING until it is used by POST /orders. A DEPOSIT is taken as soon as the
+    intent is created, so `status` is already SUCCEEDED or FAILED in the response.
+    """
 
     id: UUID
     amount: float
     currency: str = "INR"
     kind: PaymentKind
     reference_id: UUID | None = None
+    status: PaymentStatus
+    created_at: datetime
+
+
+class PaymentWebhook(ApiModel):
+    """Body of POST /orders/payments/webhook: the mock gateway reports the result of an intent."""
+
+    payment_intent_id: UUID
+    status: Literal["SUCCEEDED", "FAILED"]
+
+
+class PaymentRecord(ApiModel):
+    """A payment or refund that belongs to an order."""
+
+    id: UUID
+    kind: PaymentKind
+    amount: float
+    currency: str = "INR"
     status: PaymentStatus
     created_at: datetime
 
@@ -190,21 +226,48 @@ class CheckoutRequest(ApiModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class HarvestOrderChoice(ApiModel):
+    """Body of POST /orders/harvest: what to do with the graded harvest of a reservation."""
+
+    reservation_id: UUID
+    option: HarvestOption
+    delivery_address: DeliveryAddress | None = Field(
+        default=None, description="Required for DELIVERY, ignored for BUYBACK"
+    )
+    delivery_date: date | None = Field(
+        default=None, description="DELIVERY only. Defaults to tomorrow, like checkout."
+    )
+
+    @model_validator(mode="after")
+    def _delivery_needs_address(self) -> "HarvestOrderChoice":
+        if self.option == HarvestOption.DELIVERY and self.delivery_address is None:
+            raise ValueError("deliveryAddress is required for DELIVERY")
+        return self
+
+
 class Order(ApiModel):
-    """One order per farm, inside a checkout."""
+    """One order per farm, inside a checkout. A HARVEST order is one order from one reservation."""
 
     id: UUID
     checkout_id: UUID
     order_type: OrderType = OrderType.PRODUCE
-    farm_id: UUID
+    farm_id: UUID | None = Field(default=None, description="Empty on a harvest order")
+    reservation_id: UUID | None = Field(
+        default=None, description="The land reservation a HARVEST order comes from"
+    )
+    harvest_option: HarvestOption | None = Field(
+        default=None, description="HARVEST orders: empty until the customer chooses"
+    )
     status: OrderStatus
     items: list[OrderItem]
     subtotal: float
     delivery_fee: float
     total: float
     currency: str = "INR"
-    delivery_address: DeliveryAddress
-    delivery_date: date
+    delivery_address: DeliveryAddress | None = Field(
+        default=None, description="Empty on a harvest order that is not delivered"
+    )
+    delivery_date: date | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -214,6 +277,13 @@ class OrderDetail(Order):
 
     events: list[OrderEvent]
     rating: OrderRating | None = None
+    payments: list[PaymentRecord] = Field(
+        description="Payments and refunds of this order, oldest first"
+    )
+    balance_due: float = Field(
+        default=0,
+        description="HARVEST DELIVERY: what is still to be paid, settled when the order completes",
+    )
 
 
 class OrderSummary(ApiModel):
@@ -222,7 +292,9 @@ class OrderSummary(ApiModel):
     id: UUID
     checkout_id: UUID
     order_type: OrderType = OrderType.PRODUCE
-    farm_id: UUID
+    farm_id: UUID | None = None
+    reservation_id: UUID | None = None
+    harvest_option: HarvestOption | None = None
     status: OrderStatus
     item_count: int
     total: float
