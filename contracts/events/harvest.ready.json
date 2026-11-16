@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "harvest.ready",
+  "title": "harvest.ready",
+  "description": "Producer: land. A farmer marked the reservation crop ready for quality inspection.",
+  "type": "object",
+  "required": ["reservationId", "farmerId", "customerId", "cropId", "expectedQtyKg"],
+  "properties": {
+    "reservationId": { "type": "string", "format": "uuid" },
+    "farmerId": { "type": "string", "format": "uuid" },
+    "customerId": { "type": "string", "format": "uuid" },
+    "cropId": { "type": "string" },
+    "expectedQtyKg": { "type": "number", "exclusiveMinimum": 0 },
+    "plotCentroid": {
+      "type": ["object", "null"],
+      "properties": {
+        "type": { "const": "Point" },
+        "coordinates": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
+      }
+    }
+  },
+  "additionalProperties": true
+}
