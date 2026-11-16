@@ -25,8 +25,7 @@ then in `services/order/src/order_service/schemas.py`, then regenerate
 - Payments follow the HLD payments table: a `kind` of FULL, DEPOSIT, BALANCE or REFUND (REFUND is written by the order service, clients cannot ask for it) and an optional `referenceId` (the reservation id for deposit and balance payments). The land service (#18) pays reservation deposits "through order payments"; `POST /orders/payments/webhook` (HLD section 15) is added with #24.
 - `orderType` (PRODUCE, HARVEST) is on every order so the V2 harvest orders (#24) fit without a breaking change. `POST /orders/harvest` (HLD) is added by #24.
 - Routes are `/orders...`; the gateway (#6) adds the public `/api/v1` prefix.
-- `POST /orders/{id}/cancel` is not in this contract; it comes with #13.
-- Only the `customer` role can call these stubs. Farmer actions and admin views come with #13.
+- `POST /orders/{id}/cancel`, the farmer actions and the admin views were added with #13.
 
 ## Added by #13 (checkout saga)
 
