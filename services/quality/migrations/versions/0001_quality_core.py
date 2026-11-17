@@ -27,7 +27,6 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("subject_type", sa.String(20), nullable=False),
         sa.Column("subject_id", sa.Uuid(), nullable=False),
-        sa.Column("attempt", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("inspector_id", sa.Uuid()),
         sa.Column("status", sa.String(20), nullable=False, server_default="PENDING"),
         sa.Column("grade", sa.String(1)),
@@ -41,7 +40,7 @@ def upgrade() -> None:
         sa.Column("report_note", sa.Text()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("reported_at", sa.DateTime(timezone=True)),
-        sa.UniqueConstraint("subject_type", "subject_id", "attempt", name="inspection_subject_attempt_unique"),
+        sa.UniqueConstraint("subject_type", "subject_id", name="inspection_subject_unique"),
         schema="quality",
     )
     op.create_index("ix_quality_inspections_subject_id", "inspections", ["subject_id"], schema="quality")
