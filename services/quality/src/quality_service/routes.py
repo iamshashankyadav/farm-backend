@@ -20,7 +20,7 @@ inspector_or_admin = require_roles(Role.INSPECTOR, Role.ADMIN)
 
 def output(row: Inspection) -> InspectionOut:
     return InspectionOut(
-        id=row.id, subject_type=row.subject_type, subject_id=row.subject_id,
+        id=row.id, subject_type=row.subject_type, subject_id=row.subject_id, attempt=row.attempt,
         inspector_id=row.inspector_id, status=row.status, grade=row.grade,
         moisture_pct=row.moisture_pct, pest_found=row.pest_found, weight_kg=row.weight_kg,
         result=row.result, resolution=row.resolution, media_ids=row.media_ids or [],
@@ -139,6 +139,7 @@ async def submit_report(
                 "inspectionId": str(row.id),
                 "subjectType": row.subject_type,
                 "subjectId": str(row.subject_id),
+                "attempt": row.attempt,
                 "grade": grade,
                 "result": body.result,
                 "resolution": body.resolution,
