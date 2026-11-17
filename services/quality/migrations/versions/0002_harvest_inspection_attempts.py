@@ -1,6 +1,7 @@
 """Allow one quality inspection for each order or harvest attempt."""
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0002_harvest_inspection_attempts"
 down_revision = "0001_quality_core"
@@ -14,9 +15,7 @@ def upgrade() -> None:
         sa.Column("attempt", sa.Integer(), nullable=False, server_default="1"),
         schema="quality",
     )
-    op.drop_constraint(
-        "inspection_subject_unique", "inspections", schema="quality", type_="unique"
-    )
+    op.drop_constraint("inspection_subject_unique", "inspections", schema="quality", type_="unique")
     op.create_unique_constraint(
         "inspection_subject_attempt_unique",
         "inspections",

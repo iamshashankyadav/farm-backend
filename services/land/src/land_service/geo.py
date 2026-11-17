@@ -1,9 +1,10 @@
 from geoalchemy2.shape import from_shape, to_shape
-from shapely.geometry import MultiPolygon, Point as ShapelyPoint, shape
+from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import shape
 from shapely.validation import explain_validity
 
 from farm_common.errors import AppError
-from land_service.schemas import Polygon, Point
+from land_service.schemas import Point, Polygon
 
 
 def polygon_to_db(boundary: Polygon):

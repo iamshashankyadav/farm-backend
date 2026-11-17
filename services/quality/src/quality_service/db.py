@@ -1,10 +1,11 @@
 """Inspection and inspector-location models owned by the quality service."""
+
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from geoalchemy2 import Geometry, WKBElement
-from sqlalchemy import DateTime, Index, JSON, MetaData, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import JSON, DateTime, Index, MetaData, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from farm_common.outbox import OutboxMixin, ProcessedEventMixin
@@ -32,7 +33,9 @@ class InspectorLocation(Base):
 class Inspection(Base):
     __tablename__ = "inspections"
     __table_args__ = (
-        UniqueConstraint("subject_type", "subject_id", "attempt", name="inspection_subject_attempt_unique"),
+        UniqueConstraint(
+            "subject_type", "subject_id", "attempt", name="inspection_subject_attempt_unique"
+        ),
         Index("inspection_assignee_status_ix", "inspector_id", "status"),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)

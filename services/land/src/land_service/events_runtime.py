@@ -1,4 +1,5 @@
 """Land event bus lifecycle and 48-hour reservation expiry worker."""
+
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator
@@ -45,7 +46,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.events_enabled:
             bus = RabbitEventBus(settings.rabbitmq_url, service_name="land")
             await bus.connect()
-            await bus.subscribe(["payment.succeeded", "quality.graded"], make_handler(session_factory))
+            await bus.subscribe(
+                ["payment.succeeded", "quality.graded"], make_handler(session_factory)
+            )
             relay = asyncio.create_task(run_relay(session_factory, OutboxEvent, bus))
         yield
     finally:

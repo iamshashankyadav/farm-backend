@@ -1,4 +1,5 @@
 """Create quality inspections from packed orders and harvest-ready reservations."""
+
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
@@ -56,9 +57,12 @@ async def create_inspection(
     if inspector is not None:
         inspector.available = False
     row = Inspection(
-        subject_type=subject_type, subject_id=subject_uuid, attempt=attempt,
+        subject_type=subject_type,
+        subject_id=subject_uuid,
+        attempt=attempt,
         inspector_id=inspector.inspector_id if inspector is not None else None,
-        location=location, status="PENDING",
+        location=location,
+        status="PENDING",
     )
     session.add(row)
     await session.flush()
@@ -71,7 +75,9 @@ async def on_order_packed(session: AsyncSession, event: Event) -> None:
     pickup = items[0].get("pickupLocation") if items and isinstance(items[0], dict) else None
     if order_id:
         await create_inspection(
-            session, "ORDER", str(order_id),
+            session,
+            "ORDER",
+            str(order_id),
             event.payload.get("pickupLocation") or event.payload.get("location") or pickup,
         )
 
@@ -80,7 +86,9 @@ async def on_harvest_ready(session: AsyncSession, event: Event) -> None:
     reservation_id = event.payload.get("reservationId")
     if reservation_id:
         await create_inspection(
-            session, "HARVEST", str(reservation_id),
+            session,
+            "HARVEST",
+            str(reservation_id),
             event.payload.get("plotCentroid") or event.payload.get("location"),
             attempt=int(event.payload.get("attempt", 1)),
         )
@@ -100,4 +108,5 @@ def make_handler(session_factory: async_sessionmaker[AsyncSession]):
         async with session_factory() as session, session.begin():
             if await mark_processed(session, ProcessedEvent, event.event_id):
                 await handler(session, event)
+
     return handle

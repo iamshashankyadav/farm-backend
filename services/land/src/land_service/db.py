@@ -1,11 +1,21 @@
 """Database models for plots, seasons, reservations and crop updates."""
+
 from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from geoalchemy2 import Geometry, WKBElement
 from sqlalchemy import (
-    CheckConstraint, Date, DateTime, ForeignKey, Index, MetaData,
-    Numeric, String, Text, Uuid, text,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    MetaData,
+    Numeric,
+    String,
+    Text,
+    Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -38,7 +48,9 @@ class Plot(Base):
     soil_type: Mapped[str | None] = mapped_column(String(60), nullable=True)
     water_source: Mapped[str | None] = mapped_column(String(60), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE", index=True)
-    boundary: Mapped[WKBElement] = mapped_column(Geometry("POLYGON", srid=4326, spatial_index=False))
+    boundary: Mapped[WKBElement] = mapped_column(
+        Geometry("POLYGON", srid=4326, spatial_index=False)
+    )
     centroid: Mapped[WKBElement] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
@@ -51,7 +63,9 @@ class PlotSeason(Base):
         CheckConstraint("price > 0", name="season_price_positive"),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    plot_id: Mapped[UUID] = mapped_column(ForeignKey(f"{SCHEMA}.plots.id", ondelete="CASCADE"), index=True)
+    plot_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.plots.id", ondelete="CASCADE"), index=True
+    )
     season: Mapped[str] = mapped_column(String(40))
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date] = mapped_column(Date)
@@ -65,14 +79,16 @@ class Reservation(Base):
     __table_args__ = (
         CheckConstraint("expected_qty_kg > 0", name="reservation_qty_positive"),
         Index(
-            "one_live_reservation_per_plot_season", "plot_season_id", unique=True,
-            postgresql_where=text(
-                "status IN ('PENDING','ACCEPTED','ACTIVE','HARVEST_READY')"
-            ),
+            "one_live_reservation_per_plot_season",
+            "plot_season_id",
+            unique=True,
+            postgresql_where=text("status IN ('PENDING','ACCEPTED','ACTIVE','HARVEST_READY')"),
         ),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    plot_season_id: Mapped[UUID] = mapped_column(ForeignKey(f"{SCHEMA}.plot_seasons.id"), index=True)
+    plot_season_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.plot_seasons.id"), index=True
+    )
     customer_id: Mapped[UUID] = mapped_column(Uuid, index=True)
     farmer_id: Mapped[UUID] = mapped_column(Uuid, index=True)
     crop_id: Mapped[str] = mapped_column(String(40))
@@ -90,7 +106,9 @@ class CropUpdate(Base):
     __tablename__ = "crop_updates"
     __table_args__ = (Index("crop_updates_location_gix", "location", postgresql_using="gist"),)
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    reservation_id: Mapped[UUID] = mapped_column(ForeignKey(f"{SCHEMA}.reservations.id"), index=True)
+    reservation_id: Mapped[UUID] = mapped_column(
+        ForeignKey(f"{SCHEMA}.reservations.id"), index=True
+    )
     stage: Mapped[str] = mapped_column(String(20))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     media_ids: Mapped[list[UUID]] = mapped_column(ARRAY(Uuid), default=list)
