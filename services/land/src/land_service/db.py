@@ -80,6 +80,7 @@ class Reservation(Base):
     deposit: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     total: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
+    harvest_attempt: Mapped[int] = mapped_column(default=0, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
