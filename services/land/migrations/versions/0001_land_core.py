@@ -61,6 +61,7 @@ def upgrade() -> None:
         sa.Column("deposit", sa.Numeric(12, 2)),
         sa.Column("total", sa.Numeric(12, 2)),
         sa.Column("status", sa.String(20), nullable=False, server_default="PENDING"),
+        sa.Column("harvest_attempt", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
