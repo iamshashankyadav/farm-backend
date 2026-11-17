@@ -20,11 +20,21 @@ inspector_or_admin = require_roles(Role.INSPECTOR, Role.ADMIN)
 
 def output(row: Inspection) -> InspectionOut:
     return InspectionOut(
-        id=row.id, subject_type=row.subject_type, subject_id=row.subject_id, attempt=row.attempt,
-        inspector_id=row.inspector_id, status=row.status, grade=row.grade,
-        moisture_pct=row.moisture_pct, pest_found=row.pest_found, weight_kg=row.weight_kg,
-        result=row.result, resolution=row.resolution, media_ids=row.media_ids or [],
-        created_at=row.created_at, reported_at=row.reported_at,
+        id=row.id,
+        subject_type=row.subject_type,
+        subject_id=row.subject_id,
+        attempt=row.attempt,
+        inspector_id=row.inspector_id,
+        status=row.status,
+        grade=row.grade,
+        moisture_pct=row.moisture_pct,
+        pest_found=row.pest_found,
+        weight_kg=row.weight_kg,
+        result=row.result,
+        resolution=row.resolution,
+        media_ids=row.media_ids or [],
+        created_at=row.created_at,
+        reported_at=row.reported_at,
     )
 
 
@@ -37,7 +47,8 @@ async def update_my_location(
     row = await session.get(InspectorLocation, UUID(user.id))
     if row is None:
         row = InspectorLocation(
-            inspector_id=UUID(user.id), location=point_to_db(body.location),
+            inspector_id=UUID(user.id),
+            location=point_to_db(body.location),
             available=body.available,
         )
         session.add(row)
@@ -63,7 +74,9 @@ async def list_inspections(
     return [output(row) for row in rows]
 
 
-@router.post("/inspections/{inspection_id}/claim", response_model=InspectionOut, tags=["inspections"])
+@router.post(
+    "/inspections/{inspection_id}/claim", response_model=InspectionOut, tags=["inspections"]
+)
 async def claim_inspection(
     inspection_id: UUID,
     user: CurrentUser = Depends(inspector_or_admin),
@@ -76,11 +89,17 @@ async def claim_inspection(
         raise AppError("INSPECTION_NOT_FOUND", "Inspection not found", 404)
     if row.status != "PENDING":
         raise AppError("INSPECTION_NOT_PENDING", "Inspection is no longer pending", 409)
-    if row.inspector_id is not None and row.inspector_id != UUID(user.id) and not user.has_any(Role.ADMIN):
+    if (
+        row.inspector_id is not None
+        and row.inspector_id != UUID(user.id)
+        and not user.has_any(Role.ADMIN)
+    ):
         raise AppError("INSPECTION_ASSIGNED", "Inspection is assigned to another inspector", 409)
     profile = await session.get(InspectorLocation, UUID(user.id), with_for_update=True)
     if row.inspector_id is None and profile is not None and not profile.available:
-        raise AppError("INSPECTOR_BUSY", "This inspector is already assigned to another inspection", 409)
+        raise AppError(
+            "INSPECTOR_BUSY", "This inspector is already assigned to another inspection", 409
+        )
     row.inspector_id = UUID(user.id)
     if profile is not None:
         profile.available = False
@@ -89,7 +108,9 @@ async def claim_inspection(
     return output(row)
 
 
-@router.post("/inspections/{inspection_id}/report", response_model=InspectionOut, tags=["inspections"])
+@router.post(
+    "/inspections/{inspection_id}/report", response_model=InspectionOut, tags=["inspections"]
+)
 async def submit_report(
     inspection_id: UUID,
     body: InspectionReport,
@@ -109,7 +130,11 @@ async def submit_report(
             "Order rejection/refund decisions must be handled by the order service; submit the inspection grade as PASS after its decision.",
             409,
         )
-    if row.inspector_id is not None and row.inspector_id != UUID(user.id) and not user.has_any(Role.ADMIN):
+    if (
+        row.inspector_id is not None
+        and row.inspector_id != UUID(user.id)
+        and not user.has_any(Role.ADMIN)
+    ):
         raise AppError("INSPECTION_ASSIGNED", "Inspection is assigned to another inspector", 403)
     if row.inspector_id is None:
         row.inspector_id = UUID(user.id)

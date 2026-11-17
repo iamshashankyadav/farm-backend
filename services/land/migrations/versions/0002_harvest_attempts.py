@@ -1,6 +1,7 @@
 """Add a monotonically increasing attempt counter to land reservations."""
-from alembic import op
+
 import sqlalchemy as sa
+from alembic import op
 
 revision = "0002_harvest_attempts"
 down_revision = "0001_land_core"

@@ -1,4 +1,5 @@
 """Connect quality event consumers and transactional outbox publisher."""
+
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator

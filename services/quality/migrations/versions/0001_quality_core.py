@@ -1,8 +1,9 @@
 """Create quality inspector locations, inspections and event tables."""
-from alembic import op
+
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from alembic import op
 from geoalchemy2 import Geometry
+from sqlalchemy.dialects import postgresql
 
 revision = "0001_quality_core"
 down_revision = None
@@ -20,8 +21,19 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         schema="quality",
     )
-    op.create_index("ix_quality_inspector_locations_available", "inspector_locations", ["available"], schema="quality")
-    op.create_index("inspector_location_gix", "inspector_locations", ["location"], schema="quality", postgresql_using="gist")
+    op.create_index(
+        "ix_quality_inspector_locations_available",
+        "inspector_locations",
+        ["available"],
+        schema="quality",
+    )
+    op.create_index(
+        "inspector_location_gix",
+        "inspector_locations",
+        ["location"],
+        schema="quality",
+        postgresql_using="gist",
+    )
     op.create_table(
         "inspections",
         sa.Column("id", sa.Uuid(), primary_key=True),
@@ -43,16 +55,24 @@ def upgrade() -> None:
         sa.UniqueConstraint("subject_type", "subject_id", name="inspection_subject_unique"),
         schema="quality",
     )
-    op.create_index("ix_quality_inspections_subject_id", "inspections", ["subject_id"], schema="quality")
-    op.create_index("ix_quality_inspections_inspector_id", "inspections", ["inspector_id"], schema="quality")
+    op.create_index(
+        "ix_quality_inspections_subject_id", "inspections", ["subject_id"], schema="quality"
+    )
+    op.create_index(
+        "ix_quality_inspections_inspector_id", "inspections", ["inspector_id"], schema="quality"
+    )
     op.create_index("ix_quality_inspections_status", "inspections", ["status"], schema="quality")
-    op.create_index("inspection_assignee_status_ix", "inspections", ["inspector_id", "status"], schema="quality")
+    op.create_index(
+        "inspection_assignee_status_ix", "inspections", ["inspector_id", "status"], schema="quality"
+    )
     op.create_table(
         "outbox",
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("type", sa.String(100), nullable=False),
         sa.Column("producer", sa.String(50), nullable=False),
-        sa.Column("payload", sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False),
+        sa.Column(
+            "payload", sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False
+        ),
         sa.Column("correlation_id", sa.String(64)),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("published_at", sa.DateTime(timezone=True)),

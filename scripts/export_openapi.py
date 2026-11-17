@@ -30,7 +30,9 @@ def render(service: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true", help="compare instead of writing")
-    parser.add_argument("--write-new", action="store_true", help="also create specs that do not exist")
+    parser.add_argument(
+        "--write-new", action="store_true", help="also create specs that do not exist"
+    )
     args = parser.parse_args()
 
     services = sorted(p.name for p in (ROOT / "services").iterdir() if p.is_dir())

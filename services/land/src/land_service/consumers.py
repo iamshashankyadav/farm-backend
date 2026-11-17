@@ -1,4 +1,5 @@
 """Idempotent consumers for payment and quality lifecycle events."""
+
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
@@ -54,4 +55,5 @@ def make_handler(session_factory: async_sessionmaker[AsyncSession]):
         async with session_factory() as session, session.begin():
             if await mark_processed(session, ProcessedEvent, event.event_id):
                 await handler(session, event)
+
     return handle

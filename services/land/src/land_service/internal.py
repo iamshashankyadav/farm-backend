@@ -1,4 +1,5 @@
 """Private geo references used by the media worker; these routes are not gateway-exposed."""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -21,9 +22,7 @@ async def plot_geo(plot_id: UUID, session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/reservation/{reservation_id}")
-async def reservation_geo(
-    reservation_id: UUID, session: AsyncSession = Depends(get_session)
-):
+async def reservation_geo(reservation_id: UUID, session: AsyncSession = Depends(get_session)):
     reservation = await session.get(Reservation, reservation_id)
     if reservation is None:
         raise NotFound("Reservation not found", code="RESERVATION_NOT_FOUND")

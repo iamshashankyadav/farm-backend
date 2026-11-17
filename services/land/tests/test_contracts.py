@@ -27,9 +27,7 @@ def test_polygon_rejects_out_of_range_coordinates():
 
 
 def test_polygon_rejects_self_intersection():
-    boundary = polygon([
-        (81.0, 21.0), (81.1, 21.1), (81.0, 21.1), (81.1, 21.0), (81.0, 21.0)
-    ])
+    boundary = polygon([(81.0, 21.0), (81.1, 21.1), (81.0, 21.1), (81.1, 21.0), (81.0, 21.0)])
     with pytest.raises(AppError) as exc:
         polygon_to_db(boundary)
     assert exc.value.code == "INVALID_PLOT_BOUNDARY"
@@ -38,8 +36,11 @@ def test_polygon_rejects_self_intersection():
 def test_season_end_must_follow_start():
     with pytest.raises(ValidationError):
         SeasonCreate(
-            season="Kharif", start_date="2026-09-01", end_date="2026-08-01",
-            price=12000, allowed_crops=["rice"],
+            season="Kharif",
+            start_date="2026-09-01",
+            end_date="2026-08-01",
+            price=12000,
+            allowed_crops=["rice"],
         )
 
 
@@ -54,12 +55,14 @@ async def test_stale_quality_report_does_not_advance_a_newer_harvest_attempt():
     reservation = SimpleNamespace(status="HARVEST_READY", harvest_attempt=2)
     session = AsyncMock()
     session.get.return_value = reservation
-    event = SimpleNamespace(payload={
-        "subjectType": "HARVEST",
-        "subjectId": str(uuid4()),
-        "attempt": 1,
-        "result": "PASS",
-    })
+    event = SimpleNamespace(
+        payload={
+            "subjectType": "HARVEST",
+            "subjectId": str(uuid4()),
+            "attempt": 1,
+            "result": "PASS",
+        }
+    )
 
     await on_quality_graded(session, event)
 
@@ -71,12 +74,14 @@ async def test_current_harvest_attempt_pass_moves_reservation_to_fulfilling():
     reservation = SimpleNamespace(status="HARVEST_READY", harvest_attempt=2)
     session = AsyncMock()
     session.get.return_value = reservation
-    event = SimpleNamespace(payload={
-        "subjectType": "HARVEST",
-        "subjectId": str(uuid4()),
-        "attempt": 2,
-        "result": "PASS",
-    })
+    event = SimpleNamespace(
+        payload={
+            "subjectType": "HARVEST",
+            "subjectId": str(uuid4()),
+            "attempt": 2,
+            "result": "PASS",
+        }
+    )
 
     await on_quality_graded(session, event)
 
