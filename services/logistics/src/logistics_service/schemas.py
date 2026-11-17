@@ -1,0 +1,148 @@
+"""Request / response bodies for the logistics API (camelCase JSON via ApiModel)."""
+
+from datetime import date, datetime
+from enum import StrEnum
+from uuid import UUID
+
+from pydantic import AliasChoices, Field
+
+from farm_common.schemas import ApiModel
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+
+class StopType(StrEnum):
+    PICKUP = "PICKUP"
+    DROP = "DROP"
+
+
+class StopStatus(StrEnum):
+    PENDING = "PENDING"
+    ARRIVED = "ARRIVED"
+    DONE = "DONE"
+    SKIPPED = "SKIPPED"
+
+
+class PoolStatus(StrEnum):
+    PENDING = "PENDING"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+
+
+# ---------------------------------------------------------------------------
+# Shared sub-shapes
+# ---------------------------------------------------------------------------
+
+
+class GeoPoint(ApiModel):
+    lat: float
+    lng: float
+
+
+class StopOut(ApiModel):
+    id: UUID
+    pool_id: UUID
+    order_id: UUID
+    stop_type: StopType
+    seq: int
+    lat: float
+    lng: float
+    address: str | None = None
+    eta: datetime | None = None
+    status: StopStatus
+    photo_media_id: UUID | None = None
+    otp_verified: bool = False
+    done_at: datetime | None = None
+    weight_kg: float | None = None
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    notes: str | None = None
+    otp: str | None = None
+
+
+class PoolOut(ApiModel):
+    id: UUID
+    pool_date: date
+    partner_id: UUID | None
+    status: PoolStatus
+    total_km: float | None
+    km_saved: float | None
+    stops: list[StopOut] = Field(default_factory=list)
+    created_at: datetime
+    assigned_at: datetime | None
+
+
+# ---------------------------------------------------------------------------
+# POST /logistics/pools/run
+# ---------------------------------------------------------------------------
+
+
+class PoolRunResponse(ApiModel):
+    pools_created: int
+    pools: list[PoolOut]
+
+
+# ---------------------------------------------------------------------------
+# Stop action requests
+# ---------------------------------------------------------------------------
+
+
+class StopActionIn(ApiModel):
+    notes: str | None = None
+    reason: str | None = None
+
+
+class PickupIn(ApiModel):
+    notes: str | None = None
+    weight_kg: float | None = None
+    collected_at: datetime | None = None
+
+
+class DeliverIn(ApiModel):
+    photo_media_id: UUID = Field(description="media_id of the proof-of-delivery photo")
+    otp: str = Field(min_length=4, max_length=6, description="4-digit OTP entered by customer")
+    notes: str | None = None
+    delivered_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# POST /logistics/location
+# ---------------------------------------------------------------------------
+
+
+class LocationPingIn(ApiModel):
+    lat: float
+    lng: float
+    pool_id: UUID | None = None
+    accuracy_m: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("accuracyM", "accuracy_m", "accuracy"),
+    )
+    speed_ms: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("speedMs", "speed_ms", "speed"),
+    )
+    heading: float | None = None
+    recorded_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# GET /logistics/orders/{id}/track
+# ---------------------------------------------------------------------------
+
+
+class TrackOut(ApiModel):
+    order_id: UUID
+    pool_id: UUID | None = None
+    status: str | None = None
+    stop: StopOut | None = None
+    partner_id: UUID | None = None
+    partner_name: str | None = None
+    partner_phone: str | None = None
+    partner_lat: float | None = Field(None, description="Latest GPS lat from location pings")
+    partner_lng: float | None = Field(None, description="Latest GPS lng from location pings")
+    partner_updated_at: datetime | None = None
+    eta: datetime | None = None
