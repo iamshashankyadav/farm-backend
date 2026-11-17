@@ -111,8 +111,8 @@ async def test_pool_assigned_event_in_outbox(
 async def test_capacity_splitting_creates_multiple_pools(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    settings = LogisticsSettings(events_enabled=False, partner_capacity_kg=20.0)
-    # Three 15 kg orders near each other → 2 pools (20 kg limit)
+    settings = LogisticsSettings(events_enabled=False, partner_capacity_kg=30.0)
+    # Three 15 kg orders near each other → 2 pools (30 kg limit: 15+15, then 15)
     orders = [_order(21.100 + i * 0.001, 81.300, weight=15.0) for i in range(3)]
 
     with patch(

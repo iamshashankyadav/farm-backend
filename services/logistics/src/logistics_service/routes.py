@@ -48,6 +48,7 @@ from logistics_service.schemas import (
     StopOut,
     TrackOut,
 )
+from logistics_service.schemas import PoolStatus as SchemaPoolStatus
 from logistics_service.settings import LogisticsSettings, get_logistics_settings
 
 logger = logging.getLogger(__name__)
@@ -110,7 +111,7 @@ def _pool_out(pool: DeliveryPool, stops: list[PoolStop]) -> PoolOut:
         id=pool.id,
         pool_date=pool.pool_date,
         partner_id=pool.partner_id,
-        status=PoolStatus(pool.status),
+        status=SchemaPoolStatus(pool.status.value),
         total_km=pool.total_km,
         km_saved=pool.km_saved,
         stops=[_stop_out(s) for s in stops],
