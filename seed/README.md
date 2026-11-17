@@ -16,5 +16,14 @@ uv run --package farm-seed python -m farm_seed                 # defaults to htt
 uv run --package farm-seed python -m farm_seed --farmers 5 --customers 10
 ```
 
-Photos are not seeded yet (media needs object storage); listings show without images.
-V2 data (plots, reservations, orders) is added in Sprint 3 (issue #21).
+**V2 and orders (run after V1 in the same command):** 1 to 3 plots per farmer (square plots a few acres
+each, with a Kharif and a Rabi season), reservations taken to different stages (waiting, accepted,
+active with deposit paid and a few crop updates), and produce orders (`--orders`, default 200; use
+`--orders 2000` for the full demo set). `--skip-v2` seeds V1 only. Plots are created only for farmers
+who have none yet, so re-running does not duplicate them. Orders are placed again on every run
+(each order needs a fresh payment), so run with `--orders 0` when re-running.
+
+Not seeded yet: photos (media needs object storage), inspections and delivery pools (quality and
+logistics flows are driven by the apps and the pooling job, issue #21 stays open for those).
+Reservations become ACTIVE only once RabbitMQ delivers the deposit event, so crop updates for a
+just-paid reservation can be skipped by the API; the seeder ignores that.
