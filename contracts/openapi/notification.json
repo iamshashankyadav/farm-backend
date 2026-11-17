@@ -1,366 +1,65 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "notification service",
-    "version": "0.1.0"
-  },
-  "paths": {
-    "/health": {
-      "get": {
-        "tags": [
-          "ops"
-        ],
-        "summary": "Health",
-        "operationId": "health_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Health Health Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notifications": {
-      "get": {
-        "tags": [
-          "notifications"
-        ],
-        "summary": "List in-app notifications for the current user",
-        "operationId": "get_notifications_notifications_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Cursor for pagination",
-              "title": "Cursor"
-            },
-            "description": "Cursor for pagination"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Page size",
-              "default": 20,
-              "title": "Limit"
-            },
-            "description": "Page size"
-          },
-          {
-            "name": "unreadOnly",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "description": "Filter to only unread notifications",
-              "default": false,
-              "title": "Unreadonly"
-            },
-            "description": "Filter to only unread notifications"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationPage"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notifications/unread-count": {
-      "get": {
-        "tags": [
-          "notifications"
-        ],
-        "summary": "Get unread notification count for the current user",
-        "operationId": "get_unread_count_notifications_unread_count_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnreadCountOut"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/notifications/devices": {
-      "post": {
-        "tags": [
-          "notifications"
-        ],
-        "summary": "Register a device token for push notifications",
-        "operationId": "register_device_token_notifications_devices_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeviceTokenIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DeviceTokenOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/notifications/devices/{token}": {
-      "delete": {
-        "tags": [
-          "notifications"
-        ],
-        "summary": "Unregister a device token",
-        "operationId": "unregister_device_token_notifications_devices__token__delete",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "token",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Token"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notifications/{notification_id}/read": {
-      "post": {
-        "tags": [
-          "notifications"
-        ],
-        "summary": "Mark a notification as read",
-        "operationId": "mark_notification_read_notifications__notification_id__read_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "notification_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Notification Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notifications/read-all": {
-      "post": {
-        "tags": [
-          "notifications"
-        ],
-        "summary": "Mark all notifications as read for current user",
-        "operationId": "mark_all_read_notifications_read_all_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnreadCountOut"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    }
-  },
   "components": {
     "schemas": {
       "DevicePlatform": {
-        "type": "string",
         "enum": [
           "ios",
           "android",
           "web"
         ],
-        "title": "DevicePlatform"
+        "title": "DevicePlatform",
+        "type": "string"
       },
       "DeviceTokenIn": {
         "properties": {
+          "platform": {
+            "$ref": "#/components/schemas/DevicePlatform"
+          },
           "token": {
-            "type": "string",
+            "description": "Expo push token or FCM token",
             "maxLength": 256,
             "minLength": 10,
             "title": "Token",
-            "description": "Expo push token or FCM token"
-          },
-          "platform": {
-            "$ref": "#/components/schemas/DevicePlatform"
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "token",
           "platform"
         ],
-        "title": "DeviceTokenIn"
+        "title": "DeviceTokenIn",
+        "type": "object"
       },
       "DeviceTokenOut": {
         "properties": {
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
           "id": {
-            "type": "string",
             "format": "uuid",
-            "title": "Id"
-          },
-          "userId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Userid"
-          },
-          "token": {
-            "type": "string",
-            "title": "Token"
+            "title": "Id",
+            "type": "string"
           },
           "platform": {
             "$ref": "#/components/schemas/DevicePlatform"
           },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Createdat"
+          "token": {
+            "title": "Token",
+            "type": "string"
           },
           "updatedAt": {
-            "type": "string",
             "format": "date-time",
-            "title": "Updatedat"
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "userId": {
+            "format": "uuid",
+            "title": "Userid",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "id",
           "userId",
@@ -369,7 +68,8 @@
           "createdAt",
           "updatedAt"
         ],
-        "title": "DeviceTokenOut"
+        "title": "DeviceTokenOut",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -377,50 +77,41 @@
             "items": {
               "$ref": "#/components/schemas/ValidationError"
             },
-            "type": "array",
-            "title": "Detail"
+            "title": "Detail",
+            "type": "array"
           }
         },
-        "type": "object",
-        "title": "HTTPValidationError"
+        "title": "HTTPValidationError",
+        "type": "object"
       },
       "NotificationOut": {
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "userId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Userid"
-          },
-          "type": {
-            "$ref": "#/components/schemas/NotificationType"
-          },
-          "title": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Title"
-          },
           "body": {
-            "type": "string",
             "maxLength": 1000,
             "minLength": 1,
-            "title": "Body"
+            "title": "Body",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
           },
           "payload": {
             "additionalProperties": true,
-            "type": "object",
-            "title": "Payload"
+            "title": "Payload",
+            "type": "object"
           },
           "readAt": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -428,13 +119,21 @@
             ],
             "title": "Readat"
           },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Createdat"
+          "title": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/NotificationType"
+          },
+          "userId": {
+            "format": "uuid",
+            "title": "Userid",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "id",
           "userId",
@@ -443,7 +142,8 @@
           "body",
           "createdAt"
         ],
-        "title": "NotificationOut"
+        "title": "NotificationOut",
+        "type": "object"
       },
       "NotificationPage": {
         "properties": {
@@ -451,13 +151,8 @@
             "items": {
               "$ref": "#/components/schemas/NotificationOut"
             },
-            "type": "array",
-            "title": "Items"
-          },
-          "unreadCount": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Unreadcount"
+            "title": "Items",
+            "type": "array"
           },
           "nextCursor": {
             "anyOf": [
@@ -469,17 +164,21 @@
               }
             ],
             "title": "Nextcursor"
+          },
+          "unreadCount": {
+            "minimum": 0.0,
+            "title": "Unreadcount",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "items",
           "unreadCount"
         ],
-        "title": "NotificationPage"
+        "title": "NotificationPage",
+        "type": "object"
       },
       "NotificationType": {
-        "type": "string",
         "enum": [
           "ORDER_PLACED",
           "ORDER_CONFIRMED",
@@ -496,24 +195,32 @@
           "HARVEST_READY",
           "SYSTEM"
         ],
-        "title": "NotificationType"
+        "title": "NotificationType",
+        "type": "string"
       },
       "UnreadCountOut": {
         "properties": {
           "count": {
-            "type": "integer",
             "minimum": 0.0,
-            "title": "Count"
+            "title": "Count",
+            "type": "integer"
           }
         },
-        "type": "object",
         "required": [
           "count"
         ],
-        "title": "UnreadCountOut"
+        "title": "UnreadCountOut",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
           "loc": {
             "items": {
               "anyOf": [
@@ -525,38 +232,331 @@
                 }
               ]
             },
-            "type": "array",
-            "title": "Location"
+            "title": "Location",
+            "type": "array"
           },
           "msg": {
-            "type": "string",
-            "title": "Message"
+            "title": "Message",
+            "type": "string"
           },
           "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
+            "title": "Error Type",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "loc",
           "msg",
           "type"
         ],
-        "title": "ValidationError"
+        "title": "ValidationError",
+        "type": "object"
       }
     },
     "securitySchemes": {
       "HTTPBearer": {
-        "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "notification service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "ops"
+        ]
+      }
+    },
+    "/notifications": {
+      "get": {
+        "operationId": "get_notifications_notifications_get",
+        "parameters": [
+          {
+            "description": "Cursor for pagination",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor for pagination",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Page size",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter to only unread notifications",
+            "in": "query",
+            "name": "unreadOnly",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Filter to only unread notifications",
+              "title": "Unreadonly",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List in-app notifications for the current user",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/devices": {
+      "post": {
+        "operationId": "register_device_token_notifications_devices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceTokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceTokenOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register a device token for push notifications",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/devices/{token}": {
+      "delete": {
+        "operationId": "unregister_device_token_notifications_devices__token__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unregister a device token",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/read-all": {
+      "post": {
+        "operationId": "mark_all_read_notifications_read_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark all notifications as read for current user",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/unread-count": {
+      "get": {
+        "operationId": "get_unread_count_notifications_unread_count_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get unread notification count for the current user",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/notifications/{notification_id}/read": {
+      "post": {
+        "operationId": "mark_notification_read_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mark a notification as read",
+        "tags": [
+          "notifications"
+        ]
       }
     }
   }
