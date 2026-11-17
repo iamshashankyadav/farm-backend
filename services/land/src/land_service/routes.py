@@ -398,10 +398,12 @@ async def harvest_ready(reservation_id: UUID, user: CurrentUser = Depends(farmer
         raise AppError("RESERVATION_NOT_ACTIVE", "Only an active reservation can be marked harvest-ready", 409)
     season = await session.get(PlotSeason, row.plot_season_id)
     plot = await session.get(Plot, season.plot_id) if season else None
+    row.harvest_attempt += 1
     row.status = "HARVEST_READY"
     add_event(session, OutboxEvent, Event(type="harvest.ready", producer="land", payload={
         "reservationId": str(row.id), "farmerId": str(row.farmer_id), "customerId": str(row.customer_id),
         "cropId": row.crop_id, "expectedQtyKg": float(row.expected_qty_kg),
+        "attempt": row.harvest_attempt,
         "plotCentroid": geometry_json(plot.centroid) if plot else None,
     }))
     await session.commit()
