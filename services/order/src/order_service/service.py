@@ -10,6 +10,8 @@ Checkout saga (POST /orders):
        - payment failed -> orders CANCELLED, `order.cancelled` published (catalog releases stock)
     Any failure before step 5 releases every order id that was tried.
 
+Harvest orders (V2) are in harvest.py; event handlers are in consumers.py.
+
 Every status change is a guarded UPDATE (`WHERE status = <expected>`), writes an order_events row
 and an outbox event in the same transaction as the change.
 """
@@ -27,13 +29,13 @@ from zoneinfo import ZoneInfo
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from farm_common.auth import CurrentUser, Role
 from farm_common.errors import AppError, Conflict, Forbidden, NotFound, Unauthorized, error_body
 from farm_common.events import Event
-from farm_common.outbox import add_event, mark_processed
+from farm_common.outbox import add_event
 from order_service import events as ev
 from order_service.db import (
     CheckoutRow,
@@ -43,10 +45,9 @@ from order_service.db import (
     OrderRow,
     OutboxEvent,
     PaymentRow,
-    ProcessedEvent,
     RatingRow,
 )
-from order_service.payments import PaymentGateway
+from order_service.payments import PaymentGateway, refund_harvest_order
 from order_service.schemas import (
     Checkout,
     CheckoutRequest,
@@ -64,6 +65,7 @@ from order_service.schemas import (
     PaymentIntent,
     PaymentIntentCreate,
     PaymentKind,
+    PaymentRecord,
     PaymentStatus,
 )
 from order_service.settings import OrderSettings
@@ -128,6 +130,25 @@ def _uid(user: CurrentUser) -> UUID:
         raise Unauthorized("Invalid token", code="INVALID_TOKEN") from exc
 
 
+def _pick(payload: dict[str, Any], *names: str) -> Any:
+    """First present key; payloads are camelCase but a snake_case spelling is tolerated."""
+    for name in names:
+        if payload.get(name) is not None:
+            return payload[name]
+    return None
+
+
+def _uuid(payload: dict[str, Any], *names: str) -> UUID | None:
+    value = _pick(payload, *names)
+    if value is None:
+        return None
+    try:
+        return UUID(str(value))
+    except ValueError:
+        logger.warning("Ignoring invalid id %r in event payload", value)
+        return None
+
+
 # --- mapping rows to API models ----------------------------------------------------------------
 
 
@@ -137,6 +158,8 @@ def _order_schema(row: OrderRow) -> Order:
         checkout_id=row.checkout_id,
         order_type=row.order_type,  # type: ignore[arg-type]
         farm_id=row.farm_id,
+        reservation_id=row.reservation_id,
+        harvest_option=row.harvest_option,  # type: ignore[arg-type]
         status=OrderStatus(row.status),
         items=[
             OrderItem(
@@ -155,14 +178,35 @@ def _order_schema(row: OrderRow) -> Order:
         delivery_fee=float(row.delivery_fee),
         total=float(row.total),
         currency=row.currency,
-        delivery_address=DeliveryAddress.model_validate(row.delivery_address),
+        delivery_address=(
+            DeliveryAddress.model_validate(row.delivery_address) if row.delivery_address else None
+        ),
         delivery_date=row.delivery_date,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
 
 
-def _detail_schema(row: OrderRow) -> OrderDetail:
+def _balance_due(row: OrderRow, payments: list[PaymentRow]) -> float:
+    """HARVEST orders that are delivered (or not decided yet): total minus what was paid."""
+    if (
+        row.order_type != "HARVEST"
+        or row.harvest_option == "BUYBACK"
+        or row.status in (S.COMPLETED, S.CANCELLED)
+    ):
+        return 0.0
+    paid = sum(
+        (
+            p.amount
+            for p in payments
+            if p.status == PaymentStatus.SUCCEEDED and p.kind in ("DEPOSIT", "BALANCE")
+        ),
+        Decimal(0),
+    )
+    return float(max(row.total - paid, Decimal(0)))
+
+
+def _detail_schema(row: OrderRow, payments: list[PaymentRow]) -> OrderDetail:
     rating = (
         OrderRating(
             order_id=row.rating.order_id,
@@ -180,6 +224,18 @@ def _detail_schema(row: OrderRow) -> OrderDetail:
             for e in row.events
         ],
         rating=rating,
+        payments=[
+            PaymentRecord(
+                id=p.id,
+                kind=PaymentKind(p.kind),
+                amount=float(p.amount),
+                currency=p.currency,
+                status=PaymentStatus(p.status),
+                created_at=p.created_at,
+            )
+            for p in payments
+        ],
+        balance_due=_balance_due(row, payments),
     )
 
 
@@ -227,6 +283,31 @@ async def _load_order(session: AsyncSession, order_id: UUID, refresh: bool = Fal
     if order is None:
         raise NotFound("Order not found", code="ORDER_NOT_FOUND")
     return order
+
+
+async def _detail_of(session: AsyncSession, row: OrderRow) -> OrderDetail:
+    """The order with its timeline and its payments (a checkout's FULL payment, deposits, refunds)."""
+    belongs = PaymentRow.order_id == row.id
+    if row.order_type == "PRODUCE":
+        belongs = or_(
+            belongs,
+            and_(
+                PaymentRow.kind == PaymentKind.FULL.value,
+                PaymentRow.reference_id == row.checkout_id,
+            ),
+        )
+    payments = list(
+        (
+            await session.execute(
+                select(PaymentRow).where(belongs).order_by(PaymentRow.created_at, PaymentRow.id)
+            )
+        ).scalars()
+    )
+    return _detail_schema(row, payments)
+
+
+async def _detail(session: AsyncSession, order_id: UUID, refresh: bool = False) -> OrderDetail:
+    return await _detail_of(session, await _load_order(session, order_id, refresh=refresh))
 
 
 def _can_view(order: OrderRow, user: CurrentUser) -> bool:
@@ -301,7 +382,7 @@ async def pack_order(session: AsyncSession, user: CurrentUser, order_id: UUID) -
         raise Forbidden("This order belongs to another farm")
     await _transition(session, order, S.PACKED, ev.ORDER_PACKED)
     await session.commit()
-    return _detail_schema(await _load_order(session, order_id, refresh=True))
+    return await _detail(session, order_id, refresh=True)
 
 
 async def cancel_order(
@@ -310,6 +391,7 @@ async def cancel_order(
     """The customer, the farm's owner (HLD: farmers can cancel too) or an admin cancels an order
     until it is handed to logistics. A REFUND payment is recorded and catalog frees the stock."""
     order = await _load_order(session, order_id)
+    actor: Literal["customer", "farmer", "admin", "system"]
     if user.has_any(Role.ADMIN):
         actor = "admin"
     elif user.has_any(Role.CUSTOMER) and str(order.customer_id) == user.id:
@@ -323,9 +405,43 @@ async def cancel_order(
             f"An order in status {order.status} can no longer be cancelled",
             code="ORDER_NOT_CANCELLABLE",
         )
-    default_reason = {"customer": "CUSTOMER_REQUEST", "farmer": "FARMER_CANCELLED"}.get(
-        actor, "ADMIN_CANCELLED"
-    )
+    await cancel_row(session, order, actor, reason)
+    await session.commit()
+    return await _detail(session, order_id, refresh=True)
+
+
+async def cancel_row(
+    session: AsyncSession,
+    order: OrderRow,
+    actor: Literal["customer", "farmer", "admin", "system"],
+    reason: str | None,
+) -> None:
+    """Cancel an order (the caller commits): timeline, `order.cancelled` and the REFUND payment.
+
+    A produce order is refunded in full; a harvest order gets its deposit back (nothing else was
+    paid). The caller checks that the order may be cancelled.
+    """
+    default_reason = {
+        "customer": "CUSTOMER_REQUEST",
+        "farmer": "FARMER_CANCELLED",
+        "system": "SYSTEM_CANCELLED",
+    }.get(actor, "ADMIN_CANCELLED")
+    if order.order_type == "HARVEST":
+        refund = await refund_harvest_order(session, order)
+    else:
+        refund = order.total
+        session.add(
+            PaymentRow(
+                id=uuid4(),
+                customer_id=order.customer_id,
+                kind=PaymentKind.REFUND.value,
+                amount=order.total,
+                currency=order.currency,
+                reference_id=order.checkout_id,
+                order_id=order.id,
+                status=PaymentStatus.SUCCEEDED.value,
+            )
+        )
     await _transition(
         session,
         order,
@@ -334,22 +450,8 @@ async def cancel_order(
         note=reason,
         reason=reason or default_reason,
         cancelled_by=actor,
-        refund_amount=float(order.total),
+        refund_amount=float(refund),
     )
-    session.add(
-        PaymentRow(
-            id=uuid4(),
-            customer_id=order.customer_id,
-            kind=PaymentKind.REFUND.value,
-            amount=order.total,
-            currency=order.currency,
-            reference_id=order.checkout_id,
-            order_id=order.id,
-            status=PaymentStatus.SUCCEEDED.value,
-        )
-    )
-    await session.commit()
-    return _detail_schema(await _load_order(session, order_id, refresh=True))
 
 
 # --- queries -----------------------------------------------------------------------------------
@@ -424,6 +526,8 @@ async def list_orders(
                 checkout_id=r.checkout_id,
                 order_type=r.order_type,  # type: ignore[arg-type]
                 farm_id=r.farm_id,
+                reservation_id=r.reservation_id,
+                harvest_option=r.harvest_option,  # type: ignore[arg-type]
                 status=OrderStatus(r.status),
                 item_count=len(r.items),
                 total=float(r.total),
@@ -438,7 +542,7 @@ async def list_orders(
 
 
 async def get_order(session: AsyncSession, user: CurrentUser, order_id: UUID) -> OrderDetail:
-    return _detail_schema(await _load_visible(session, order_id, user))
+    return await _detail_of(session, await _load_visible(session, order_id, user))
 
 
 # --- payments and rating -----------------------------------------------------------------------
@@ -447,6 +551,7 @@ async def get_order(session: AsyncSession, user: CurrentUser, order_id: UUID) ->
 async def create_payment_intent(
     session: AsyncSession, user: CurrentUser, body: PaymentIntentCreate
 ) -> PaymentIntent:
+    """A FULL intent for checkout. DEPOSIT intents are created by harvest.create_deposit_intent."""
     row = PaymentRow(
         id=uuid4(),
         customer_id=_uid(user),
@@ -743,81 +848,3 @@ async def _save_checkout(
     claim.response_body = response
     await session.commit()
     return status_code, response
-
-
-# --- event handlers (consumers) ----------------------------------------------------------------
-
-
-def _pick(payload: dict[str, Any], *names: str) -> Any:
-    """First present key; payloads are camelCase but a snake_case spelling is tolerated."""
-    for name in names:
-        if payload.get(name) is not None:
-            return payload[name]
-    return None
-
-
-def _order_ids(payload: dict[str, Any]) -> list[UUID]:
-    raw = _pick(payload, "orderIds", "order_ids") or [_pick(payload, "orderId", "order_id")]
-    ids = []
-    for value in raw:
-        try:
-            ids.append(UUID(str(value)))
-        except ValueError:
-            logger.warning("Ignoring invalid order id %r in event payload", value)
-    return ids
-
-
-async def _advance(
-    session: AsyncSession,
-    order_id: UUID,
-    expected: set[OrderStatus],
-    steps: list[tuple[OrderStatus, str | None]],
-    note: str,
-) -> None:
-    """Apply `steps` to an order that is currently in one of `expected`; skip otherwise."""
-    order = (
-        await session.execute(select(OrderRow).where(OrderRow.id == order_id).options(*_LOAD))
-    ).scalar_one_or_none()
-    if order is None or OrderStatus(order.status) not in expected:
-        logger.info(
-            "Skipping %s for order %s in status %s", note, order_id, order.status if order else None
-        )
-        return
-    for new, event_type in steps:
-        await _transition(session, order, new, event_type, note=note)
-
-
-async def handle_event(session_factory: async_sessionmaker[AsyncSession], event: Event) -> None:
-    """Apply an event from another service. Safe to deliver twice (deduped by event_id)."""
-    if event.type not in ev.CONSUMED:
-        return
-    async with session_factory() as session, session.begin():
-        if not await mark_processed(session, ProcessedEvent, event.event_id):
-            return
-        payload = event.payload
-        if event.type == ev.QUALITY_GRADED:
-            # TODO(M1): quality (#12) is not merged; assumed payload is {orderId} or
-            # {subjectType: "ORDER", subjectId}. Catalog already reads subjectType/subjectId.
-            subject_type = _pick(payload, "subjectType", "subject_type") or "ORDER"
-            if subject_type != "ORDER":
-                return  # listings and harvests are graded too; only ORDER concerns this service
-            payload = {"orderId": _pick(payload, "orderId", "order_id", "subjectId", "subject_id")}
-            steps: list[tuple[OrderStatus, str | None]] = [
-                (S.QC_PASSED, None),
-                (S.READY_FOR_DISPATCH, ev.ORDER_READY_FOR_DISPATCH),
-            ]
-            expected, note = {S.PACKED}, "Quality check passed"
-        elif event.type == ev.POOL_ASSIGNED:
-            # TODO(M1): assumed payload {orderIds: [...]} (or {orderId}); owner M2 (#19)
-            steps, expected, note = [(S.POOLED, None)], {S.READY_FOR_DISPATCH}, "Delivery pooled"
-        elif event.type == ev.DELIVERY_STARTED:
-            steps, expected, note = (
-                [(S.IN_TRANSIT, None)],
-                {S.READY_FOR_DISPATCH, S.POOLED},
-                "Picked up",
-            )
-        else:  # delivery.completed
-            steps = [(S.DELIVERED, None), (S.COMPLETED, ev.ORDER_COMPLETED)]
-            expected, note = {S.READY_FOR_DISPATCH, S.POOLED, S.IN_TRANSIT}, "Delivered"
-        for order_id in _order_ids(payload):
-            await _advance(session, order_id, expected, steps, note)

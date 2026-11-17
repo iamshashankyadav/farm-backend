@@ -22,7 +22,9 @@ cd services/order && uv run alembic upgrade head
 
 | Route | Who | What |
 | --- | --- | --- |
-| `POST /orders/payments/intent` | customer | create a mock payment intent |
+| `POST /orders/payments/intent` | customer | create a mock payment intent (`FULL` for checkout, `DEPOSIT` for a land reservation) |
+| `POST /orders/payments/webhook` | mock gateway | settle a pending deposit (header `X-Webhook-Secret`) |
+| `POST /orders/harvest` | customer | choose DELIVERY or BUYBACK for a graded harvest (V2) |
 | `POST /orders` | customer | checkout (needs `Idempotency-Key`), one order per farm |
 | `GET /orders` | customer, farmer, admin | own orders / farm orders / all; `status`, `role`, `cursor`, `limit` |
 | `GET /orders/{id}` | customer, farmer, admin | one order with its status timeline |
@@ -32,7 +34,9 @@ cd services/order && uv run alembic upgrade head
 
 JSON is camelCase. Events published and consumed are listed at the top of `src/order_service/events.py`.
 Settings (env vars): `DATABASE_URL`, `RABBITMQ_URL`, `CATALOG_URL`, `DELIVERY_FEE_PER_ORDER`,
-`MOCK_PAYMENT_FAIL_AMOUNT`, `EVENTS_ENABLED`.
+`MOCK_PAYMENT_FAIL_AMOUNT`, `EVENTS_ENABLED`, and for harvest orders `MOCK_AUTO_SETTLE`,
+`PAYMENT_WEBHOOK_SECRET`, `HARVEST_DEPOSIT_SHARE`, `GRADE_B_PRICE_FACTOR`, `GRADE_C_PRICE_FACTOR`,
+`BUYBACK_RATE`. The harvest flow is described in `harvest.py` and docs/m1-assumptions.md.
 
 ```bash
 uv run --package farm-order pytest services/order            # SQLite in memory

@@ -1,16 +1,23 @@
 """Events published and consumed by the order service. Payloads are camelCase, like every API.
 
 Published (through the outbox, in the same transaction as the status change):
-    order.placed              checkout succeeded and payment was taken (status CONFIRMED)
+    order.placed              checkout succeeded and payment was taken (status CONFIRMED); also a
+                              HARVEST order created after a passed quality check (status PLACED)
     order.packed              the farmer packed it; quality creates an inspection
     order.ready_for_dispatch  quality passed; logistics can pool it
     order.completed           delivered and closed
-    payment.succeeded         a payment was taken (checkout, or a deposit once #24 lands)
+    payment.succeeded         a payment was taken: a checkout (FULL), a reservation deposit (DEPOSIT,
+                              `referenceId` = reservation id; land activates the reservation) or the
+                              balance of a harvest order (BALANCE)
     order.cancelled           cancelled by the customer, or payment failed; catalog releases the
                               stock reserved for `orderId` when it sees this
 
 Consumed:
-    quality.graded      -> QC_PASSED, then READY_FOR_DISPATCH
+    quality.graded      -> ORDER subject: QC_PASSED, then READY_FOR_DISPATCH (result FAIL cancels
+                           the order and refunds it); HARVEST subject: creates the harvest order
+    reservation.accepted -> remembers the reservation (customer, farmer, deposit) for #24
+    harvest.ready       -> remembers the crop and where it is (the pickup point of the harvest)
+    reservation.cancelled -> refunds a paid deposit (TODO(M1): event name assumed, owner M7)
     pool.assigned       -> POOLED                      (TODO(M1): payload assumed, owner M2)
     delivery.started    -> IN_TRANSIT                  (TODO(M1): event name assumed, owner M2)
     delivery.completed  -> DELIVERED, then COMPLETED
@@ -25,7 +32,14 @@ from uuid import UUID
 
 from farm_common.schemas import ApiModel
 from order_service.db import OrderRow
-from order_service.schemas import DeliveryAddress, GeoPoint, OrderStatus, OrderType, PaymentKind
+from order_service.schemas import (
+    DeliveryAddress,
+    GeoPoint,
+    HarvestOption,
+    OrderStatus,
+    OrderType,
+    PaymentKind,
+)
 
 PRODUCER = "order"
 
@@ -37,15 +51,26 @@ ORDER_CANCELLED = "order.cancelled"
 PAYMENT_SUCCEEDED = "payment.succeeded"
 
 QUALITY_GRADED = "quality.graded"
+RESERVATION_ACCEPTED = "reservation.accepted"
+RESERVATION_CANCELLED = "reservation.cancelled"
+HARVEST_READY = "harvest.ready"
 POOL_ASSIGNED = "pool.assigned"
 DELIVERY_STARTED = "delivery.started"
 DELIVERY_COMPLETED = "delivery.completed"
 
-CONSUMED = [QUALITY_GRADED, POOL_ASSIGNED, DELIVERY_STARTED, DELIVERY_COMPLETED]
+CONSUMED = [
+    QUALITY_GRADED,
+    RESERVATION_ACCEPTED,
+    RESERVATION_CANCELLED,
+    HARVEST_READY,
+    POOL_ASSIGNED,
+    DELIVERY_STARTED,
+    DELIVERY_COMPLETED,
+]
 
 
 class EventItem(ApiModel):
-    listing_id: UUID
+    listing_id: UUID | None = None  # empty on a harvest order
     name: str
     unit: str
     qty: float
@@ -59,17 +84,19 @@ class OrderEventPayload(ApiModel):
     order_id: UUID
     checkout_id: UUID
     customer_id: UUID
-    farm_id: UUID
+    farm_id: UUID | None = None  # empty on a harvest order
     farm_owner_id: UUID | None = None
     order_type: OrderType
+    reservation_id: UUID | None = None  # HARVEST orders
+    harvest_option: HarvestOption | None = None  # HARVEST orders, once the customer chose
     status: OrderStatus
     items: list[EventItem]
     subtotal: float
     delivery_fee: float
     total: float
     currency: str
-    delivery_address: DeliveryAddress
-    delivery_date: date
+    delivery_address: DeliveryAddress | None = None  # empty unless the order is delivered
+    delivery_date: date | None = None
 
 
 class OrderCancelledPayload(OrderEventPayload):
@@ -80,7 +107,7 @@ class OrderCancelledPayload(OrderEventPayload):
 
 class PaymentSucceededPayload(ApiModel):
     """A payment went through. Land (#18) activates a reservation when it sees a DEPOSIT with its
-    id as `referenceId`."""
+    id as `referenceId`. A BALANCE payment also lists the harvest order it settled."""
 
     payment_id: UUID
     kind: PaymentKind
@@ -112,6 +139,8 @@ def build_payload(order: OrderRow, **extra: Any) -> dict[str, Any]:
         "farm_id": order.farm_id,
         "farm_owner_id": order.farm_owner_id,
         "order_type": order.order_type,
+        "reservation_id": order.reservation_id,
+        "harvest_option": order.harvest_option,
         "status": order.status,
         "items": [
             {

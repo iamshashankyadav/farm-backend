@@ -10,9 +10,9 @@ from fastapi import FastAPI
 from farm_common.events import Event, RabbitEventBus
 from farm_common.outbox import run_relay
 from order_service import events as ev
+from order_service.consumers import handle_event
 from order_service.db import OutboxEvent
 from order_service.deps import get_session_factory
-from order_service.service import handle_event
 from order_service.settings import get_order_settings
 
 logger = logging.getLogger(__name__)
