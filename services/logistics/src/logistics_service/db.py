@@ -157,9 +157,13 @@ class PoolStop(Base):
     status: Mapped[str] = mapped_column(String(10), default=StopStatus.PENDING)
     # Proof of delivery (photo media_id + 4-digit OTP)
     photo_media_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    otp: Mapped[str | None] = mapped_column(String(6), nullable=True)
     otp_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    customer_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    customer_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 class LocationPing(Base):
