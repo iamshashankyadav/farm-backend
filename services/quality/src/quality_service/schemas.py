@@ -55,6 +55,7 @@ class InspectionOut(ApiModel):
     id: UUID
     subject_type: str
     subject_id: UUID
+    attempt: int
     inspector_id: UUID | None
     status: str
     grade: str | None
