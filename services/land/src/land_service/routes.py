@@ -552,6 +552,15 @@ async def cancel_reservation(
     if row.status not in LIVE:
         raise AppError("RESERVATION_NOT_CANCELLABLE", "Reservation is no longer active", 409)
     row.status = "CANCELLED"
+    add_event(
+        session,
+        OutboxEvent,
+        Event(
+            type="reservation.cancelled",
+            producer="land",
+            payload={"reservationId": str(row.id)},
+        ),
+    )
     await session.commit()
     await session.refresh(row)
     return reservation_out(row)
