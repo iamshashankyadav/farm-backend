@@ -17,6 +17,7 @@ members = [
     "farm-notification",
     "farm-order",
     "farm-quality",
+    "farm-seed",
 ]
 
 [manifest.dependency-groups]
@@ -788,6 +789,17 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
+
+[[package]]
+name = "farm-seed"
+version = "0.1.0"
+source = { editable = "seed" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = ">=0.27" }]
 
 [[package]]
 name = "fastapi"

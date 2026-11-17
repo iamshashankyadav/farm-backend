@@ -2,7 +2,7 @@
 # `uv sync --all-packages` installs libs/common and every service into one .venv for local dev.
 
 [tool.uv.workspace]
-members = ["libs/common", "services/*"]
+members = ["libs/common", "services/*", "seed"]
 
 [dependency-groups]
 dev = [
@@ -36,7 +36,7 @@ extend-immutable-calls = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["farm_common", "*_service"]
+known-first-party = ["farm_common", "farm_seed", "*_service"]
 
 [tool.pytest.ini_options]
 # importlib mode: every service has its own tests/ folder with the same file names
