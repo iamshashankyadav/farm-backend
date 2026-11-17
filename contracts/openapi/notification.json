@@ -166,7 +166,7 @@
             "title": "Nextcursor"
           },
           "unreadCount": {
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Unreadcount",
             "type": "integer"
           }
@@ -201,7 +201,7 @@
       "UnreadCountOut": {
         "properties": {
           "count": {
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Count",
             "type": "integer"
           }
