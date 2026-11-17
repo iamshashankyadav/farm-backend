@@ -111,7 +111,7 @@ def _pool_out(pool: DeliveryPool, stops: list[PoolStop]) -> PoolOut:
         id=pool.id,
         pool_date=pool.pool_date,
         partner_id=pool.partner_id,
-        status=SchemaPoolStatus(pool.status.value),
+        status=SchemaPoolStatus(pool.status),
         total_km=pool.total_km,
         km_saved=pool.km_saved,
         stops=[_stop_out(s) for s in stops],
