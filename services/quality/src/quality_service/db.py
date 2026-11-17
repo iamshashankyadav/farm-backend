@@ -32,12 +32,13 @@ class InspectorLocation(Base):
 class Inspection(Base):
     __tablename__ = "inspections"
     __table_args__ = (
-        UniqueConstraint("subject_type", "subject_id", name="inspection_subject_unique"),
+        UniqueConstraint("subject_type", "subject_id", "attempt", name="inspection_subject_attempt_unique"),
         Index("inspection_assignee_status_ix", "inspector_id", "status"),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     subject_type: Mapped[str] = mapped_column(String(20))
     subject_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    attempt: Mapped[int] = mapped_column(default=1, nullable=False)
     inspector_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(20), default="PENDING", index=True)
     grade: Mapped[str | None] = mapped_column(String(1), nullable=True)
