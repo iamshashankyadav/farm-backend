@@ -4,7 +4,7 @@
   "title": "quality.graded",
   "description": "Producer: quality. A report was submitted for an order or harvest inspection.",
   "type": "object",
-  "required": ["inspectionId", "subjectType", "subjectId", "grade", "result"],
+  "required": ["inspectionId", "subjectType", "subjectId", "attempt", "grade", "result"],
   "properties": {
     "inspectionId": { "type": "string", "format": "uuid" },
     "subjectType": { "enum": ["ORDER", "HARVEST"] },
