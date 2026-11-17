@@ -2,8 +2,9 @@ import argparse
 import os
 
 from farm_seed.client import Gateway
-from farm_seed.data import build_dataset
+from farm_seed.data import build_dataset, build_v2_plan
 from farm_seed.v1 import as_dict, seed_v1
+from farm_seed.v2 import seed_v2
 
 
 def main() -> None:
@@ -15,18 +16,23 @@ def main() -> None:
     parser.add_argument("--admin-password", default=os.getenv("SEED_ADMIN_PASSWORD"))
     parser.add_argument("--farmers", type=int, default=20)
     parser.add_argument("--customers", type=int, default=40)
+    parser.add_argument(
+        "--orders", type=int, default=200, help="produce orders to place (0 = none)"
+    )
+    parser.add_argument(
+        "--skip-v2", action="store_true", help="only farmers, farms, listings, customers"
+    )
     args = parser.parse_args()
     if not (args.admin_phone and args.admin_password):
         parser.error(
             "give --admin-phone and --admin-password (or SEED_ADMIN_PHONE / SEED_ADMIN_PASSWORD)"
         )
-    summary = seed_v1(
-        Gateway(args.base_url),
-        build_dataset(args.farmers, args.customers),
-        args.admin_phone,
-        args.admin_password,
-    )
-    print("Seeded:", as_dict(summary))
+    gateway = Gateway(args.base_url)
+    data = build_dataset(args.farmers, args.customers)
+    summary = seed_v1(gateway, data, args.admin_phone, args.admin_password)
+    print("Seeded V1:", as_dict(summary))
+    if not args.skip_v2:
+        print("Seeded V2:", seed_v2(gateway, data, build_v2_plan(data, args.orders)))
 
 
 if __name__ == "__main__":

@@ -202,3 +202,137 @@ def build_dataset(farmers: int = 20, customers: int = 40, seed: int = SEED) -> D
             )
         )
     return Dataset(farmers=out_farmers, customers=out_customers)
+
+
+# ---- V2 (land) and order plans -------------------------------------------------------------
+
+SEASONS = [("Kharif", "2026-06-15", "2026-10-31"), ("Rabi", "2026-11-15", "2027-03-31")]
+PLOT_CROPS = [
+    "tomato",
+    "onion",
+    "potato",
+    "brinjal",
+    "okra",
+    "cabbage",
+    "carrot",
+    "peas",
+    "spinach",
+]
+NOTES = [
+    "Seeds sown, soil moist.",
+    "First leaves are out.",
+    "Weeding done this week.",
+    "Flowering has started.",
+    "Good growth after the rain.",
+]
+STAGES = ["SOWN", "GROWING", "FLOWERING"]
+
+
+@dataclass
+class PlotSpec:
+    title: str
+    ring: list[list[float]]  # closed ring of [lng, lat]
+    soil_type: str
+    water_source: str
+    price_per_kg: float
+    crops: list[str]
+
+
+@dataclass
+class ReservationPlan:
+    farmer_index: int
+    plot_index: int
+    season: str
+    customer_index: int
+    crop_id: str
+    qty_kg: float
+    stage: str  # how far it is taken: PENDING, ACCEPTED, ACTIVE (accepted + deposit paid)
+    updates: list[tuple[str, str]]
+
+
+@dataclass
+class OrderPlan:
+    customer_index: int
+    farmer_indices: list[int]  # which farmers' listings to buy from
+    picks: list[int]  # index into each farmer's listing list
+    qty: list[float]
+
+
+@dataclass
+class V2Plan:
+    plots: dict[int, list[PlotSpec]]  # farmer index -> plots
+    reservations: list[ReservationPlan]
+    orders: list[OrderPlan]
+
+
+def _square(lat: float, lng: float, side_m: float) -> list[list[float]]:
+    d_lat = side_m / 111_000 / 2
+    d_lng = side_m / (111_000 * 0.9) / 2  # good enough at Indian latitudes
+    pts = [
+        [lng - d_lng, lat - d_lat],
+        [lng + d_lng, lat - d_lat],
+        [lng + d_lng, lat + d_lat],
+        [lng - d_lng, lat + d_lat],
+    ]
+    pts = [[round(x, 6), round(y, 6)] for x, y in pts]
+    return [*pts, pts[0]]
+
+
+def build_v2_plan(data: Dataset, orders: int = 200, seed: int = SEED) -> V2Plan:
+    rng = random.Random(seed + 1)
+    plots: dict[int, list[PlotSpec]] = {}
+    for i, farmer in enumerate(data.farmers):
+        farm = farmer.farms[0]
+        n = rng.choice([1, 2, 2, 3])
+        plots[i] = []
+        for k in range(n):
+            side = rng.uniform(80, 130)  # about 1.6 to 4 acres
+            # plots sit in a row 300 m apart so they never overlap
+            plots[i].append(
+                PlotSpec(
+                    title=f"{farmer.name.split()[1]} plot {k + 1}, {farm.village}",
+                    ring=_square(farm.lat + 0.004, farm.lng + 0.004 * (k + 1), side),
+                    soil_type=rng.choice(["Black soil", "Red soil", "Alluvial", "Loam"]),
+                    water_source=rng.choice(["Borewell", "Canal", "River", "Rain-fed"]),
+                    price_per_kg=float(rng.randint(15, 60)),
+                    crops=rng.sample(PLOT_CROPS, rng.randint(3, 5)),
+                )
+            )
+
+    reservations: list[ReservationPlan] = []
+    taken: set[tuple[int, int, str]] = set()
+    for _ in range(max(1, len(data.farmers) * 2)):
+        f = rng.randrange(len(data.farmers))
+        p = rng.randrange(len(plots[f]))
+        season = rng.choice(SEASONS)[0]
+        if (f, p, season) in taken:
+            continue
+        taken.add((f, p, season))
+        stage = rng.choices(["PENDING", "ACCEPTED", "ACTIVE"], weights=[2, 1, 4])[0]
+        count = rng.randint(1, 3) if stage == "ACTIVE" else 0
+        updates = [(STAGES[j], rng.choice(NOTES)) for j in range(count)]
+        reservations.append(
+            ReservationPlan(
+                farmer_index=f,
+                plot_index=p,
+                season=season,
+                customer_index=rng.randrange(len(data.customers)),
+                crop_id=rng.choice(plots[f][p].crops),
+                qty_kg=float(rng.randint(100, 900)),
+                stage=stage,
+                updates=updates,
+            )
+        )
+
+    order_plans: list[OrderPlan] = []
+    for _ in range(orders):
+        farmers = rng.sample(range(len(data.farmers)), rng.choice([1, 1, 2]))
+        order_plans.append(
+            OrderPlan(
+                customer_index=rng.randrange(len(data.customers)),
+                farmer_indices=farmers,
+                picks=[rng.randrange(3) for _ in farmers],
+                qty=[float(rng.randint(1, 5)) for _ in farmers],
+            )
+        )
+    return V2Plan(plots=plots, reservations=reservations, orders=order_plans)

@@ -6,8 +6,9 @@ import httpx
 
 from catalog_service.crops import CROPS as CATALOG_CROPS
 from farm_seed.client import Gateway
-from farm_seed.data import CROPS, build_dataset
+from farm_seed.data import CROPS, build_dataset, build_v2_plan
 from farm_seed.v1 import seed_v1
+from farm_seed.v2 import seed_v2
 
 
 def test_dataset_is_deterministic():
@@ -30,6 +31,18 @@ class FakeGateway:
         self.listings: list[dict] = []
         self.idem: dict[str, httpx.Response] = {}
         self.admin_id = str(uuid4())
+        self.plots: dict[str, list[dict]] = {}
+        self.reservations: list[dict] = []
+        self.intents: list[dict] = []
+        self.orders: list[dict] = []
+
+    @property
+    def listings_by_farmer(self):
+        # the fake catalog does not track owners; give every farmer two active listings
+        return {
+            f"{u['id']}": [{"id": str(uuid4()), "status": "ACTIVE"} for _ in range(2)]
+            for u in self.users.values()
+        }
 
     def tokens(self, user):
         return {
@@ -79,6 +92,30 @@ class FakeGateway:
         if path == "/catalog/listings":
             self.listings.append(body)
             return httpx.Response(201, json={"id": str(uuid4())})
+        if path == "/catalog/listings/mine":
+            mine = [x for x in self.listings_by_farmer.get(who, [])]
+            return httpx.Response(200, json={"items": mine})
+        if path == "/land/plots/mine":
+            return httpx.Response(200, json=self.plots.get(who, []))
+        if path == "/land/plots":
+            plot = {"id": str(uuid4())}
+            self.plots.setdefault(who, []).append(plot)
+            return httpx.Response(201, json=plot)
+        if re.fullmatch(r"/land/plots/.+/seasons", path):
+            return httpx.Response(201, json={"id": str(uuid4())})
+        if path == "/land/reservations":
+            self.reservations.append(body)
+            return httpx.Response(201, json={"id": str(uuid4())})
+        if re.fullmatch(r"/land/reservations/.+/accept", path):
+            return httpx.Response(200, json={"deposit": 800})
+        if re.fullmatch(r"/land/reservations/.+/updates", path):
+            return httpx.Response(201, json={})
+        if path == "/orders/payments/intent":
+            self.intents.append(body)
+            return httpx.Response(201, json={"id": str(uuid4()), "status": "SUCCEEDED"})
+        if path == "/orders":
+            self.orders.append(body)
+            return httpx.Response(201, json={"orders": []})
         return httpx.Response(404, json={})
 
 
@@ -97,3 +134,30 @@ def test_seeding_twice_creates_everything_once():
     assert len(fake.listings) == listings_after_first
     assert sum(len(v) for v in fake.farms.values()) == first.farms
     assert all(u["farmerVerified"] for p, u in fake.users.items() if "farmer" in u["roles"])
+
+
+def test_v2_seeding_creates_plots_reservations_and_orders_once():
+    fake = FakeGateway()
+    gw = Gateway("http://gw/api/v1", transport=httpx.MockTransport(fake.handle))
+    data = build_dataset(6, 8)
+    plan = build_v2_plan(data, orders=15)
+    seed_v1(gw, data, "+910000000000", "pw")
+
+    first = seed_v2(gw, data, plan)
+    second = seed_v2(gw, data, plan)
+
+    assert first.plots == sum(len(v) for v in plan.plots.values())
+    assert first.seasons == first.plots * 2
+    assert first.reservations == len(fake.reservations) > 0
+    assert first.orders == 15 == len(fake.orders)
+    assert second.plots == 0 and second.reservations == 0  # plots exist: nothing new
+    assert any(i["kind"] == "DEPOSIT" for i in fake.intents)
+
+
+def test_v2_plan_is_deterministic_and_plots_do_not_overlap_within_a_farmer():
+    data = build_dataset(6, 8)
+    assert build_v2_plan(data, 10) == build_v2_plan(data, 10)
+    for specs in build_v2_plan(data, 0).plots.values():
+        boxes = [(min(p[0] for p in s.ring), max(p[0] for p in s.ring)) for s in specs]
+        for a, b in zip(boxes, boxes[1:], strict=False):
+            assert a[1] < b[0]
