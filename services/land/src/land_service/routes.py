@@ -196,7 +196,7 @@ async def search_plots(
     if season:
         query = query.where(PlotSeason.season == season)
     if crop:
-        query = query.where(PlotSeason.allowed_crops.any(crop))
+        query = query.where(PlotSeason.allowed_crops.any(crop))  # type: ignore[arg-type]
     if west is not None:
         envelope = func.ST_MakeEnvelope(west, south, east, north, 4326)
         query = query.where(Plot.boundary.op("&&")(envelope))
@@ -287,10 +287,10 @@ async def update_plot(
                 details={"plotId": str(overlap)},
             )
         row.boundary = boundary
-        row.area_acres = await session.scalar(
+        row.area_acres = await session.scalar(  # type: ignore[assignment]
             select(func.ST_Area(cast(typed_boundary, Geography(srid=4326))) / 4046.8564224)
         )
-        row.centroid = await session.scalar(
+        row.centroid = await session.scalar(  # type: ignore[assignment]
             select(
                 func.ST_Centroid(typed_boundary, type_=Geometry(geometry_type="POINT", srid=4326))
             )
