@@ -55,7 +55,7 @@ def _wkt_point(lat: float, lng: float) -> WKTElement:
 def _wkt_linestring(coords: list[tuple[float, float]]) -> WKTElement | None:
     if len(coords) < 2:
         return None
-    pairs = " ".join(f"{lng} {lat}" for lat, lng in coords)
+    pairs = ", ".join(f"{lng} {lat}" for lat, lng in coords)
     return WKTElement(f"LINESTRING({pairs})", srid=4326)
 
 

@@ -56,9 +56,7 @@ def upgrade() -> None:
     op.create_index(
         "pool_partner_date_ix", "delivery_pools", ["partner_id", "pool_date"], schema=SCHEMA
     )
-    op.execute(
-        f"CREATE INDEX pool_geom_gix ON {SCHEMA}.delivery_pools USING gist (geom)"
-    )
+    op.execute(f"CREATE INDEX pool_geom_gix ON {SCHEMA}.delivery_pools USING gist (geom)")
 
     op.create_table(
         "pool_stops",
@@ -89,9 +87,7 @@ def upgrade() -> None:
     )
     op.create_index("stop_pool_seq_ix", "pool_stops", ["pool_id", "seq"], schema=SCHEMA)
     op.create_index("stop_order_ix", "pool_stops", ["order_id"], schema=SCHEMA)
-    op.execute(
-        f"CREATE INDEX stop_geom_gix ON {SCHEMA}.pool_stops USING gist (geom)"
-    )
+    op.execute(f"CREATE INDEX stop_geom_gix ON {SCHEMA}.pool_stops USING gist (geom)")
 
     op.create_table(
         "location_pings",

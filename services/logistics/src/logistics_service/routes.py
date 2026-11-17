@@ -396,19 +396,20 @@ async def record_location(
         )
         pool_id = active_pool.scalar_one_or_none()
 
-    async with session.begin():
-        session.add(
-            LocationPing(
-                partner_id=UUID(user.id),
-                pool_id=pool_id,
-                lat=body.lat,
-                lng=body.lng,
-                accuracy_m=body.accuracy_m,
-                speed_ms=body.speed_ms,
-                heading=body.heading,
-                recorded_at=body.recorded_at or datetime.now(UTC),
-            )
+    # The lookup above already began a transaction, so commit rather than begin().
+    session.add(
+        LocationPing(
+            partner_id=UUID(user.id),
+            pool_id=pool_id,
+            lat=body.lat,
+            lng=body.lng,
+            accuracy_m=body.accuracy_m,
+            speed_ms=body.speed_ms,
+            heading=body.heading,
+            recorded_at=body.recorded_at or datetime.now(UTC),
         )
+    )
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------
