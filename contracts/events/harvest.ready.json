@@ -4,13 +4,14 @@
   "title": "harvest.ready",
   "description": "Producer: land. A farmer marked the reservation crop ready for quality inspection.",
   "type": "object",
-  "required": ["reservationId", "farmerId", "customerId", "cropId", "expectedQtyKg"],
+  "required": ["reservationId", "farmerId", "customerId", "cropId", "expectedQtyKg", "attempt"],
   "properties": {
     "reservationId": { "type": "string", "format": "uuid" },
     "farmerId": { "type": "string", "format": "uuid" },
     "customerId": { "type": "string", "format": "uuid" },
     "cropId": { "type": "string" },
     "expectedQtyKg": { "type": "number", "exclusiveMinimum": 0 },
+    "attempt": { "type": "integer", "minimum": 1 },
     "plotCentroid": {
       "type": ["object", "null"],
       "properties": {
