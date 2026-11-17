@@ -95,4 +95,4 @@ services/<name>/
   tests/
 ```
 
-Running everything together with Docker Compose (Postgres + PostGIS, RabbitMQ, Redis, MinIO, Traefik) is added by issue #2.
+Run everything together with Docker Compose (Postgres + PostGIS, RabbitMQ, Redis, MinIO, Traefik): see [infra/README.md](infra/README.md).
