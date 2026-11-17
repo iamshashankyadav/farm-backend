@@ -78,9 +78,13 @@ def upgrade() -> None:
         sa.Column("eta", sa.DateTime(timezone=True), nullable=True),
         sa.Column("status", sa.String(10), nullable=False, server_default="PENDING"),
         sa.Column("photo_media_id", sa.Uuid(), nullable=True),
+        sa.Column("otp", sa.String(6), nullable=True),
         sa.Column("otp_verified", sa.Boolean(), nullable=False, server_default="false"),
         sa.Column("done_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("weight_kg", sa.Float(), nullable=True),
+        sa.Column("customer_name", sa.String(120), nullable=True),
+        sa.Column("customer_phone", sa.String(20), nullable=True),
+        sa.Column("notes", sa.String(300), nullable=True),
         schema=SCHEMA,
     )
     op.create_index("stop_pool_seq_ix", "pool_stops", ["pool_id", "seq"], schema=SCHEMA)
