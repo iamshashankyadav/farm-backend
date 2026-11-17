@@ -32,6 +32,8 @@ async def on_quality_graded(session: AsyncSession, event: Event) -> None:
     row = await session.get(Reservation, UUID(str(reservation_id)), with_for_update=True)
     if row is None or row.status != "HARVEST_READY":
         return
+    if payload.get("attempt") != row.harvest_attempt:
+        return  # Ignore a delayed report from an earlier re-harvest attempt.
     if payload.get("result") == "PASS" or payload.get("resolution") == "ACCEPT_LOWER_GRADE":
         row.status = "FULFILLING"
     elif payload.get("resolution") == "REHARVEST":
