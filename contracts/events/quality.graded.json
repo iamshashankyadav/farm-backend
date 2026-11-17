@@ -9,6 +9,7 @@
     "inspectionId": { "type": "string", "format": "uuid" },
     "subjectType": { "enum": ["ORDER", "HARVEST"] },
     "subjectId": { "type": "string", "format": "uuid" },
+    "attempt": { "type": "integer", "minimum": 1 },
     "grade": { "enum": ["A", "B", "C"] },
     "result": { "enum": ["PASS", "FAIL"] },
     "resolution": { "enum": ["REHARVEST", "ACCEPT_LOWER_GRADE", null] },
