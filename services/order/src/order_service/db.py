@@ -54,6 +54,37 @@ class PaymentRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class HarvestRow(Base):
+    """What the order service knows about a land reservation (V2, issue #24).
+
+    Filled from `reservation.accepted` (who and the deposit), `harvest.ready` (crop, expected
+    quantity, where the crop is) and `quality.graded` (result, weight). The harvest order is
+    created from it once the quality check passes.
+    """
+
+    __tablename__ = "harvest_reservations"
+
+    reservation_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    customer_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    farmer_id: Mapped[UUID] = mapped_column(Uuid)
+    # ACCEPTED -> HARVEST_READY -> ORDERED, or CANCELLED
+    status: Mapped[str] = mapped_column(String(20), default="ACCEPTED")
+    deposit: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    # the agreed price of the whole crop; may be missing, see docs/m1-assumptions.md
+    total: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    crop_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    expected_qty_kg: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    plot_location: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    deposit_payment_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    deposit_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal(0))
+    deposit_refunded: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal(0))
+    quality_result: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    quality_grade: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    order_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class CheckoutRow(Base):
     __tablename__ = "checkouts"
 
@@ -84,18 +115,23 @@ class OrderRow(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     checkout_id: Mapped[UUID] = mapped_column(ForeignKey(f"{SCHEMA}.checkouts.id"), index=True)
     customer_id: Mapped[UUID] = mapped_column(Uuid)
-    farm_id: Mapped[UUID] = mapped_column(Uuid)
+    # No farm for a HARVEST order: it comes from a reservation (`reservation_id`)
+    farm_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     # Owner (user id) of the farm, copied from the catalog at reserve time so a farmer can be
-    # matched to their orders without calling catalog.
+    # matched to their orders without calling catalog. For a HARVEST order: the reservation's farmer.
     farm_owner_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     order_type: Mapped[str] = mapped_column(String(20), default="PRODUCE")
+    reservation_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
+    # DELIVERY or BUYBACK; empty until the customer chooses
+    harvest_option: Mapped[str | None] = mapped_column(String(10), nullable=True)
     status: Mapped[str] = mapped_column(String(30), index=True)
     subtotal: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     delivery_fee: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
     currency: Mapped[str] = mapped_column(String(3), default="INR")
-    delivery_address: Mapped[dict[str, Any]] = mapped_column(_JSON)
-    delivery_date: Mapped[date] = mapped_column(Date)
+    # empty for a HARVEST order that is not delivered (not chosen yet, or BUYBACK)
+    delivery_address: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
+    delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -117,8 +153,9 @@ class OrderItemRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     order_id: Mapped[UUID] = mapped_column(ForeignKey(f"{SCHEMA}.orders.id"), index=True)
-    listing_id: Mapped[UUID] = mapped_column(Uuid)
-    farm_id: Mapped[UUID] = mapped_column(Uuid)
+    # a harvest line comes from a reservation, not from a listing
+    listing_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    farm_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     name: Mapped[str] = mapped_column(String(200))
     unit: Mapped[str] = mapped_column(String(20))
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3))

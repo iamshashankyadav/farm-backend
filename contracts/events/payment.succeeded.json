@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "PaymentKind": {
-      "description": "What a payment is for (HLD section 10). The land service pays reservation deposits through\nthis API too. REFUND rows are written by the order service, never requested by a client.",
+      "description": "What a payment is for (HLD section 10). The land service pays reservation deposits through\nthis API too. BALANCE and REFUND rows are written by the order service, never requested by a\nclient.",
       "enum": [
         "FULL",
         "DEPOSIT",

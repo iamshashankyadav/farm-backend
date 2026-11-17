@@ -339,15 +339,3 @@ async def test_a_declined_payment_publishes_no_payment_succeeded(api):
     await api.checkout(amount=float(FAIL_AMOUNT))
 
     assert await api.outbox("payment.succeeded") == []
-
-
-async def test_only_full_payments_can_pay_for_an_order(api):
-    deposit = await api.http.post(
-        "/orders/payments/intent",
-        json={"amount": 500, "kind": "DEPOSIT", "referenceId": str(uuid4())},
-    )
-
-    response = await api.checkout(payment_intent_id=deposit.json()["id"])
-
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "PAYMENT_INTENT_USED"

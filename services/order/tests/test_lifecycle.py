@@ -6,8 +6,8 @@ from sqlalchemy import update
 from farm_common.auth import Role
 from farm_common.errors import Conflict
 from farm_common.events import Event
+from order_service import consumers, service
 from order_service import events as ev
-from order_service import service
 from order_service.db import OrderRow
 from order_service.events import OrderCancelledPayload, OrderEventPayload
 
@@ -29,7 +29,7 @@ ADMIN = user(uuid4(), Role.ADMIN)
 
 async def deliver(api, event_type: str, **payload) -> Event:
     event = Event(type=event_type, producer="test", payload=payload)
-    await service.handle_event(api.session_factory, event)
+    await consumers.handle_event(api.session_factory, event)
     return event
 
 
@@ -117,7 +117,7 @@ async def test_quality_graded_is_applied_once_when_delivered_twice(api):
     await pack(api, order["id"])
     event = await deliver(api, "quality.graded", orderId=order["id"], grade="A")
 
-    await service.handle_event(api.session_factory, event)  # redelivery of the same event
+    await consumers.handle_event(api.session_factory, event)  # redelivery of the same event
 
     assert len(await api.outbox("order.ready_for_dispatch")) == 1
 
@@ -451,3 +451,38 @@ async def test_another_farmer_cannot_cancel_it(api):
     api.login(user(FARMER_B, Role.FARMER))
 
     assert (await api.http.post(f"/orders/{order['id']}/cancel")).status_code == 404
+
+
+async def test_a_failed_inspection_cancels_the_packed_order_and_refunds_it(api):
+    order = await api.placed_order(FARM_A)
+    await pack(api, order["id"])
+
+    await deliver(
+        api,
+        "quality.graded",
+        subjectType="ORDER",
+        subjectId=order["id"],
+        grade="C",
+        result="FAIL",
+    )
+
+    detail = (await api.http.get(f"/orders/{order['id']}")).json()
+    assert detail["status"] == "CANCELLED"
+    assert detail["events"][-1]["note"] == "QUALITY_FAILED"
+    assert detail["payments"][-1]["kind"] == "REFUND"
+    (cancelled,) = await api.outbox("order.cancelled")
+    payload = OrderCancelledPayload.model_validate(cancelled.payload)
+    assert (payload.cancelled_by, payload.reason) == ("system", "QUALITY_FAILED")
+    assert payload.refund_amount == detail["total"]
+    assert await api.outbox("order.ready_for_dispatch") == []
+
+
+async def test_a_passed_inspection_with_a_result_makes_the_order_ready(api):
+    order = await api.placed_order(FARM_A)
+    await pack(api, order["id"])
+
+    await deliver(
+        api, "quality.graded", subjectType="ORDER", subjectId=order["id"], grade="A", result="PASS"
+    )
+
+    assert await status_of(api, order["id"]) == "READY_FOR_DISPATCH"

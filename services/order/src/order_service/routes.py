@@ -1,5 +1,7 @@
 """HTTP routes of the order service. Request and response models are in schemas.py (the contract)."""
 
+import secrets
+from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -8,7 +10,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from farm_common.auth import CurrentUser, Role, require_roles
-from order_service import service
+from farm_common.errors import Unauthorized
+from order_service import harvest, service
 from order_service.deps import get_payment_gateway, get_session, get_stock_client
 from order_service.payments import PaymentGateway
 from order_service.schemas import (
@@ -16,6 +19,7 @@ from order_service.schemas import (
     Checkout,
     CheckoutRequest,
     ErrorResponse,
+    HarvestOrderChoice,
     OrderDetail,
     OrderList,
     OrderRating,
@@ -23,6 +27,8 @@ from order_service.schemas import (
     OrderStatus,
     PaymentIntent,
     PaymentIntentCreate,
+    PaymentKind,
+    PaymentWebhook,
 )
 from order_service.settings import OrderSettings, get_order_settings
 from order_service.stock import StockClient
@@ -49,14 +55,94 @@ _NOT_FOUND: dict[int | str, dict] = {
     response_model=PaymentIntent,
     status_code=201,
     summary="Create a mock payment intent",
-    responses=_AUTH_ERRORS,
+    description=(
+        "kind FULL (default): pay for a checkout; the intent stays PENDING until POST /orders uses "
+        "it. kind DEPOSIT: pay the deposit of an accepted land reservation (`referenceId` is the "
+        "reservation id, `amount` must equal its deposit); the mock gateway takes it at once, so "
+        "`status` in the response is SUCCEEDED (or FAILED for the test amount) and the land "
+        "service activates the reservation. BALANCE and REFUND are created by the order service."
+    ),
+    responses={
+        **_AUTH_ERRORS,
+        404: {"model": ErrorResponse, "description": "RESERVATION_NOT_FOUND (DEPOSIT)"},
+        409: {
+            "model": ErrorResponse,
+            "description": "DEPOSIT_ALREADY_PAID or RESERVATION_NOT_PAYABLE (DEPOSIT)",
+        },
+        422: {"model": ErrorResponse, "description": "DEPOSIT_AMOUNT_MISMATCH (DEPOSIT)"},
+    },
 )
 async def create_payment_intent(
     body: PaymentIntentCreate,
     user: CurrentUser = Depends(_customer),
     session: AsyncSession = Depends(get_session),
+    gateway: PaymentGateway = Depends(get_payment_gateway),
+    settings: OrderSettings = Depends(get_order_settings),
 ) -> PaymentIntent:
+    if body.kind == PaymentKind.DEPOSIT:
+        assert body.reference_id is not None  # checked by the request model
+        return await harvest.create_deposit_intent(
+            session, user, Decimal(str(body.amount)), body.reference_id, gateway, settings
+        )
     return await service.create_payment_intent(session, user, body)
+
+
+@router.post(
+    "/orders/payments/webhook",
+    response_model=PaymentIntent,
+    summary="Mock gateway: report the result of a payment intent",
+    description=(
+        "Called by the (mock) payment gateway, not by an app. Authenticated with the shared secret "
+        "in the X-Webhook-Secret header. Settles a PENDING DEPOSIT intent; repeating the same "
+        "result is harmless. Only needed when the deposit was not taken at once."
+    ),
+    responses={
+        401: {"model": ErrorResponse, "description": "INVALID_WEBHOOK_SECRET"},
+        404: {"model": ErrorResponse, "description": "PAYMENT_INTENT_NOT_FOUND"},
+        409: {
+            "model": ErrorResponse,
+            "description": "PAYMENT_ALREADY_SETTLED, PAYMENT_NOT_SETTLEABLE or DEPOSIT_ALREADY_PAID",
+        },
+    },
+)
+async def payment_webhook(
+    body: PaymentWebhook,
+    webhook_secret: str = Header(alias="X-Webhook-Secret", default=""),
+    session: AsyncSession = Depends(get_session),
+    settings: OrderSettings = Depends(get_order_settings),
+) -> PaymentIntent:
+    if not secrets.compare_digest(webhook_secret, settings.payment_webhook_secret):
+        raise Unauthorized("Invalid webhook secret", code="INVALID_WEBHOOK_SECRET")
+    return await harvest.apply_webhook(session, body.payment_intent_id, body.status == "SUCCEEDED")
+
+
+@router.post(
+    "/orders/harvest",
+    response_model=OrderDetail,
+    summary="Customer: choose delivery or buy-back for a graded harvest",
+    description=(
+        "The harvest order is created when the quality check passes (status PLACED, no option). "
+        "DELIVERY needs `deliveryAddress` (and optionally `deliveryDate`): the order becomes "
+        "READY_FOR_DISPATCH and is pooled like any order; the balance (total minus deposit) is "
+        "charged when it is delivered. BUYBACK: the farmer buys the harvest, the customer is "
+        "credited and the order is COMPLETED. Repeating the same choice returns the order."
+    ),
+    responses={
+        **_AUTH_ERRORS,
+        404: {"model": ErrorResponse, "description": "RESERVATION_NOT_FOUND"},
+        409: {
+            "model": ErrorResponse,
+            "description": "HARVEST_NOT_READY, HARVEST_OPTION_CHOSEN or HARVEST_ORDER_CLOSED",
+        },
+    },
+)
+async def choose_harvest_option(
+    body: HarvestOrderChoice,
+    user: CurrentUser = Depends(_customer),
+    session: AsyncSession = Depends(get_session),
+    settings: OrderSettings = Depends(get_order_settings),
+) -> OrderDetail:
+    return await harvest.choose_option(session, user, body, settings)
 
 
 @router.post(

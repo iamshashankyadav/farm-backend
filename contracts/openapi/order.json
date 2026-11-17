@@ -36,6 +36,7 @@
           "orders"
         ],
         "summary": "Create a mock payment intent",
+        "description": "kind FULL (default): pay for a checkout; the intent stays PENDING until POST /orders uses it. kind DEPOSIT: pay the deposit of an accepted land reservation (`referenceId` is the reservation id, `amount` must equal its deposit); the mock gateway takes it at once, so `status` in the response is SUCCEEDED (or FAILED for the test amount) and the land service activates the reservation. BALANCE and REFUND are created by the order service.",
         "operationId": "create_payment_intent_orders_payments_intent_post",
         "requestBody": {
           "content": {
@@ -70,6 +71,197 @@
           },
           "403": {
             "description": "The token does not have the required role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESERVATION_NOT_FOUND (DEPOSIT)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DEPOSIT_ALREADY_PAID or RESERVATION_NOT_PAYABLE (DEPOSIT)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "DEPOSIT_AMOUNT_MISMATCH (DEPOSIT)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/orders/payments/webhook": {
+      "post": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "Mock gateway: report the result of a payment intent",
+        "description": "Called by the (mock) payment gateway, not by an app. Authenticated with the shared secret in the X-Webhook-Secret header. Settles a PENDING DEPOSIT intent; repeating the same result is harmless. Only needed when the deposit was not taken at once.",
+        "operationId": "payment_webhook_orders_payments_webhook_post",
+        "parameters": [
+          {
+            "name": "X-Webhook-Secret",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "X-Webhook-Secret"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentWebhook"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentIntent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "INVALID_WEBHOOK_SECRET",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "PAYMENT_INTENT_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PAYMENT_ALREADY_SETTLED, PAYMENT_NOT_SETTLEABLE or DEPOSIT_ALREADY_PAID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/harvest": {
+      "post": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "Customer: choose delivery or buy-back for a graded harvest",
+        "description": "The harvest order is created when the quality check passes (status PLACED, no option). DELIVERY needs `deliveryAddress` (and optionally `deliveryDate`): the order becomes READY_FOR_DISPATCH and is pooled like any order; the balance (total minus deposit) is charged when it is delivered. BUYBACK: the farmer buys the harvest, the customer is credited and the order is COMPLETED. Repeating the same choice returns the order.",
+        "operationId": "choose_harvest_option_orders_harvest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HarvestOrderChoice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token does not have the required role",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "RESERVATION_NOT_FOUND",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "HARVEST_NOT_READY, HARVEST_OPTION_CHOSEN or HARVEST_ORDER_CLOSED",
             "content": {
               "application/json": {
                 "schema": {
@@ -1033,6 +1225,58 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HarvestOption": {
+        "type": "string",
+        "enum": [
+          "DELIVERY",
+          "BUYBACK"
+        ],
+        "title": "HarvestOption",
+        "description": "What a customer does with a graded harvest (HLD section 12)."
+      },
+      "HarvestOrderChoice": {
+        "properties": {
+          "reservationId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Reservationid"
+          },
+          "option": {
+            "$ref": "#/components/schemas/HarvestOption"
+          },
+          "deliveryAddress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required for DELIVERY, ignored for BUYBACK"
+          },
+          "deliveryDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverydate",
+            "description": "DELIVERY only. Defaults to tomorrow, like checkout."
+          }
+        },
+        "type": "object",
+        "required": [
+          "reservationId",
+          "option"
+        ],
+        "title": "HarvestOrderChoice",
+        "description": "Body of POST /orders/harvest: what to do with the graded harvest of a reservation."
+      },
       "Order": {
         "properties": {
           "id": {
@@ -1050,9 +1294,41 @@
             "default": "PRODUCE"
           },
           "farmId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Farmid"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Farmid",
+            "description": "Empty on a harvest order"
+          },
+          "reservationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservationid",
+            "description": "The land reservation a HARVEST order comes from"
+          },
+          "harvestOption": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HarvestOption"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "HARVEST orders: empty until the customer chooses"
           },
           "status": {
             "$ref": "#/components/schemas/OrderStatus"
@@ -1082,11 +1358,26 @@
             "default": "INR"
           },
           "deliveryAddress": {
-            "$ref": "#/components/schemas/DeliveryAddress"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Empty on a harvest order that is not delivered"
           },
           "deliveryDate": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Deliverydate"
           },
           "createdAt": {
@@ -1104,19 +1395,16 @@
         "required": [
           "id",
           "checkoutId",
-          "farmId",
           "status",
           "items",
           "subtotal",
           "deliveryFee",
           "total",
-          "deliveryAddress",
-          "deliveryDate",
           "createdAt",
           "updatedAt"
         ],
         "title": "Order",
-        "description": "One order per farm, inside a checkout."
+        "description": "One order per farm, inside a checkout. A HARVEST order is one order from one reservation."
       },
       "OrderDetail": {
         "properties": {
@@ -1135,9 +1423,41 @@
             "default": "PRODUCE"
           },
           "farmId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Farmid"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Farmid",
+            "description": "Empty on a harvest order"
+          },
+          "reservationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservationid",
+            "description": "The land reservation a HARVEST order comes from"
+          },
+          "harvestOption": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HarvestOption"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "HARVEST orders: empty until the customer chooses"
           },
           "status": {
             "$ref": "#/components/schemas/OrderStatus"
@@ -1167,11 +1487,26 @@
             "default": "INR"
           },
           "deliveryAddress": {
-            "$ref": "#/components/schemas/DeliveryAddress"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryAddress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Empty on a harvest order that is not delivered"
           },
           "deliveryDate": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Deliverydate"
           },
           "createdAt": {
@@ -1200,23 +1535,35 @@
                 "type": "null"
               }
             ]
+          },
+          "payments": {
+            "items": {
+              "$ref": "#/components/schemas/PaymentRecord"
+            },
+            "type": "array",
+            "title": "Payments",
+            "description": "Payments and refunds of this order, oldest first"
+          },
+          "balanceDue": {
+            "type": "number",
+            "title": "Balancedue",
+            "description": "HARVEST DELIVERY: what is still to be paid, settled when the order completes",
+            "default": 0
           }
         },
         "type": "object",
         "required": [
           "id",
           "checkoutId",
-          "farmId",
           "status",
           "items",
           "subtotal",
           "deliveryFee",
           "total",
-          "deliveryAddress",
-          "deliveryDate",
           "createdAt",
           "updatedAt",
-          "events"
+          "events",
+          "payments"
         ],
         "title": "OrderDetail",
         "description": "GET /orders/{id}: the order plus its status timeline, oldest first."
@@ -1254,14 +1601,30 @@
       "OrderItem": {
         "properties": {
           "listingId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Listingid"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Listingid",
+            "description": "Empty on a harvest order"
           },
           "farmId": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Farmid"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Farmid",
+            "description": "Empty on a harvest order"
           },
           "name": {
             "type": "string",
@@ -1296,8 +1659,6 @@
         },
         "type": "object",
         "required": [
-          "listingId",
-          "farmId",
           "name",
           "unit",
           "qty",
@@ -1459,9 +1820,38 @@
             "default": "PRODUCE"
           },
           "farmId": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Farmid"
+          },
+          "reservationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservationid"
+          },
+          "harvestOption": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HarvestOption"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "$ref": "#/components/schemas/OrderStatus"
@@ -1494,7 +1884,6 @@
         "required": [
           "id",
           "checkoutId",
-          "farmId",
           "status",
           "itemCount",
           "total",
@@ -1562,7 +1951,7 @@
           "createdAt"
         ],
         "title": "PaymentIntent",
-        "description": "A mock payment. In this project it always succeeds unless the amount is a test value."
+        "description": "A mock payment. In this project it always succeeds unless the amount is a test value.\n\nA FULL intent stays PENDING until it is used by POST /orders. A DEPOSIT is taken as soon as the\nintent is created, so `status` is already SUCCEEDED or FAILED in the response."
       },
       "PaymentIntentCreate": {
         "properties": {
@@ -1606,7 +1995,46 @@
           "REFUND"
         ],
         "title": "PaymentKind",
-        "description": "What a payment is for (HLD section 10). The land service pays reservation deposits through\nthis API too. REFUND rows are written by the order service, never requested by a client."
+        "description": "What a payment is for (HLD section 10). The land service pays reservation deposits through\nthis API too. BALANCE and REFUND rows are written by the order service, never requested by a\nclient."
+      },
+      "PaymentRecord": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PaymentKind"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "default": "INR"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "amount",
+          "status",
+          "createdAt"
+        ],
+        "title": "PaymentRecord",
+        "description": "A payment or refund that belongs to an order."
       },
       "PaymentStatus": {
         "type": "string",
@@ -1617,6 +2045,30 @@
           "REFUNDED"
         ],
         "title": "PaymentStatus"
+      },
+      "PaymentWebhook": {
+        "properties": {
+          "paymentIntentId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Paymentintentid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paymentIntentId",
+          "status"
+        ],
+        "title": "PaymentWebhook",
+        "description": "Body of POST /orders/payments/webhook: the mock gateway reports the result of an intent."
       },
       "ValidationError": {
         "properties": {
