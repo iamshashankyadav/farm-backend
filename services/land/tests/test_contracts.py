@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from farm_common.errors import AppError
+from land_service.db import Reservation
 from land_service.geo import polygon_to_db
 from land_service.schemas import Polygon, SeasonCreate
 
@@ -35,3 +36,9 @@ def test_season_end_must_follow_start():
             season="Kharif", start_date="2026-09-01", end_date="2026-08-01",
             price=12000, allowed_crops=["rice"],
         )
+
+
+def test_reservations_track_harvest_attempts():
+    column = Reservation.__table__.c.harvest_attempt
+    assert column.default.arg == 0
+    assert column.nullable is False
