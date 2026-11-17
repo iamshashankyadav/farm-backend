@@ -638,6 +638,7 @@ dependencies = [
     { name = "farm-common" },
     { name = "fastapi" },
     { name = "geoalchemy2" },
+    { name = "shapely" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -649,6 +650,7 @@ requires-dist = [
     { name = "farm-common", editable = "libs/common" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "geoalchemy2", specifier = ">=0.15" },
+    { name = "shapely", specifier = ">=2.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
@@ -775,6 +777,7 @@ dependencies = [
     { name = "farm-common" },
     { name = "fastapi" },
     { name = "geoalchemy2" },
+    { name = "shapely" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -786,6 +789,7 @@ requires-dist = [
     { name = "farm-common", editable = "libs/common" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "geoalchemy2", specifier = ">=0.15" },
+    { name = "shapely", specifier = ">=2.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reservation.accepted",
+  "title": "reservation.accepted",
+  "description": "Producer: land. A farmer accepted a pending plot reservation. The customer pays the deposit through the order payment API.",
+  "type": "object",
+  "required": ["reservationId", "customerId", "farmerId", "deposit"],
+  "properties": {
+    "reservationId": { "type": "string", "format": "uuid" },
+    "customerId": { "type": "string", "format": "uuid" },
+    "farmerId": { "type": "string", "format": "uuid" },
+    "deposit": { "type": "number", "minimum": 0 }
+  },
+  "additionalProperties": true
+}
