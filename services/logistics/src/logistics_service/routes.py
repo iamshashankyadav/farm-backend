@@ -6,6 +6,8 @@ POST  /logistics/pools/run?date     Admin → trigger pooling job now
 GET   /logistics/my-route?date      Delivery partner → today's assigned route
 POST  /logistics/stops/{id}/pickup  Delivery partner → confirm pickup at hub
 POST  /logistics/stops/{id}/deliver Delivery partner → confirm delivery + photo + OTP
+POST  /logistics/stops/{id}/arrive  Delivery partner → mark arrival at stop
+POST  /logistics/stops/{id}/skip    Delivery partner → mark stop skipped
 POST  /logistics/location           Delivery partner → location ping (every 30 s)
 GET   /logistics/orders/{id}/track  Customer → live tracking
 """
@@ -22,10 +24,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from farm_common.auth import CurrentUser, Role, get_current_user, require_roles
 from farm_common.errors import AppError, NotFound
+from farm_common.events import Event
+from farm_common.outbox import add_event
 from logistics_service.database import get_session
 from logistics_service.db import (
+    DeliveryPartner,
     DeliveryPool,
     LocationPing,
+    OutboxEvent,
     PoolStatus,
     PoolStop,
     StopStatus,
@@ -38,6 +44,7 @@ from logistics_service.schemas import (
     PickupIn,
     PoolOut,
     PoolRunResponse,
+    StopActionIn,
     StopOut,
     TrackOut,
 )
@@ -71,6 +78,10 @@ def _stop_out(s: PoolStop) -> StopOut:
         otp_verified=s.otp_verified,
         done_at=s.done_at,
         weight_kg=s.weight_kg,
+        customer_name=s.customer_name,
+        customer_phone=s.customer_phone,
+        notes=s.notes,
+        otp=s.otp,
     )
 
 
@@ -166,7 +177,21 @@ async def my_route(
     )
     pool = result.scalar_one_or_none()
     if pool is None:
+        # Check if there is an active assigned / in-progress pool for this partner
+        result = await session.execute(
+            select(DeliveryPool)
+            .where(
+                DeliveryPool.partner_id == UUID(user.id),
+                DeliveryPool.status.in_([PoolStatus.IN_PROGRESS, PoolStatus.ASSIGNED]),
+            )
+            .order_by(DeliveryPool.created_at.desc())
+            .limit(1)
+        )
+        pool = result.scalar_one_or_none()
+
+    if pool is None:
         raise NotFound("No pool assigned for this date", code="NO_POOL")
+
     _, stops = await _get_pool_with_stops(session, pool.id)
     return _pool_out(pool, stops)
 
@@ -183,10 +208,11 @@ async def my_route(
 )
 async def confirm_pickup(
     stop_id: UUID,
-    body: PickupIn,
+    body: PickupIn | None = None,
     user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
     session: AsyncSession = Depends(get_session),
 ) -> StopOut:
+    pickup_body = body or PickupIn()
     async with session.begin():
         stop = await _get_stop(session, stop_id)
         if stop.stop_type != StopType.PICKUP:
@@ -194,19 +220,43 @@ async def confirm_pickup(
         if stop.status == StopStatus.DONE:
             return _stop_out(stop)
         stop.status = StopStatus.DONE
-        stop.done_at = datetime.now(UTC)
-        if body.weight_kg is not None:
-            stop.weight_kg = body.weight_kg
+        stop.done_at = pickup_body.collected_at or datetime.now(UTC)
+        if pickup_body.weight_kg is not None:
+            stop.weight_kg = pickup_body.weight_kg
+        if pickup_body.notes:
+            stop.notes = pickup_body.notes
+
+        # Advance pool to IN_PROGRESS if currently PENDING or ASSIGNED
+        pool = await session.get(DeliveryPool, stop.pool_id)
+        if pool:
+            if pool.status in (PoolStatus.PENDING, PoolStatus.ASSIGNED):
+                pool.status = PoolStatus.IN_PROGRESS
+            if not pool.partner_id:
+                pool.partner_id = UUID(user.id)
+
+        # Publish delivery.started event through outbox
+        add_event(
+            session,
+            OutboxEvent,
+            Event(
+                type="delivery.started",
+                producer="logistics",
+                payload={
+                    "poolId": str(stop.pool_id),
+                    "stopId": str(stop.id),
+                    "orderId": str(stop.order_id),
+                    "orderIds": [str(stop.order_id)],
+                    "partnerId": str(user.id),
+                    "pickedUpAt": stop.done_at.isoformat(),
+                },
+            ),
+        )
     return _stop_out(stop)
 
 
 # ---------------------------------------------------------------------------
 # POST /logistics/stops/{id}/deliver  (Delivery partner)
 # ---------------------------------------------------------------------------
-
-# Simple 4-digit OTP: in production this would be verified against an OTP
-# issued to the customer; for the scaffold we accept any 4-digit value and
-# set otp_verified = True (the real check lives in the order service).
 
 
 @router.post(
@@ -228,10 +278,92 @@ async def confirm_delivery(
             return _stop_out(stop)
         if not body.otp.isdigit():
             raise AppError("INVALID_OTP", "OTP must be 4 digits", 422)
+        if stop.otp and body.otp != stop.otp:
+            raise AppError("INVALID_OTP", "Provided OTP does not match", 422)
+
         stop.photo_media_id = body.photo_media_id
         stop.otp_verified = True
         stop.status = StopStatus.DONE
-        stop.done_at = datetime.now(UTC)
+        stop.done_at = body.delivered_at or datetime.now(UTC)
+        if body.notes:
+            stop.notes = body.notes
+
+        # Check if all stops in the pool are now DONE
+        stops_result = await session.execute(
+            select(PoolStop).where(PoolStop.pool_id == stop.pool_id)
+        )
+        all_stops = list(stops_result.scalars())
+        if all(s.status == StopStatus.DONE or s.id == stop.id for s in all_stops):
+            pool = await session.get(DeliveryPool, stop.pool_id)
+            if pool:
+                pool.status = PoolStatus.COMPLETED
+
+        # Publish delivery.completed event through outbox (Issue #20 requirement)
+        add_event(
+            session,
+            OutboxEvent,
+            Event(
+                type="delivery.completed",
+                producer="logistics",
+                payload={
+                    "poolId": str(stop.pool_id),
+                    "stopId": str(stop.id),
+                    "orderId": str(stop.order_id),
+                    "orderIds": [str(stop.order_id)],
+                    "partnerId": str(user.id),
+                    "photoMediaId": str(body.photo_media_id),
+                    "otpVerified": True,
+                    "deliveredAt": stop.done_at.isoformat(),
+                },
+            ),
+        )
+    return _stop_out(stop)
+
+
+# ---------------------------------------------------------------------------
+# POST /logistics/stops/{id}/arrive  (Delivery partner)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/stops/{stop_id}/arrive",
+    response_model=StopOut,
+    summary="Mark partner arrival at a stop",
+)
+async def arrive_at_stop(
+    stop_id: UUID,
+    user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
+    session: AsyncSession = Depends(get_session),
+) -> StopOut:
+    async with session.begin():
+        stop = await _get_stop(session, stop_id)
+        if stop.status != StopStatus.DONE:
+            stop.status = StopStatus.ARRIVED
+    return _stop_out(stop)
+
+
+# ---------------------------------------------------------------------------
+# POST /logistics/stops/{id}/skip  (Delivery partner)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/stops/{stop_id}/skip",
+    response_model=StopOut,
+    summary="Mark a stop as skipped",
+)
+async def skip_stop(
+    stop_id: UUID,
+    body: StopActionIn | None = None,
+    user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
+    session: AsyncSession = Depends(get_session),
+) -> StopOut:
+    action_body = body or StopActionIn()
+    async with session.begin():
+        stop = await _get_stop(session, stop_id)
+        stop.status = StopStatus.SKIPPED
+        if action_body.notes or action_body.reason:
+            stop.notes = action_body.notes or action_body.reason
     return _stop_out(stop)
 
 
@@ -250,17 +382,31 @@ async def record_location(
     user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
     session: AsyncSession = Depends(get_session),
 ) -> None:
+    pool_id = body.pool_id
+    if pool_id is None:
+        # Auto-resolve partner's active pool
+        active_pool = await session.execute(
+            select(DeliveryPool.id)
+            .where(
+                DeliveryPool.partner_id == UUID(user.id),
+                DeliveryPool.status.in_([PoolStatus.IN_PROGRESS, PoolStatus.ASSIGNED]),
+            )
+            .order_by(DeliveryPool.created_at.desc())
+            .limit(1)
+        )
+        pool_id = active_pool.scalar_one_or_none()
+
     async with session.begin():
         session.add(
             LocationPing(
                 partner_id=UUID(user.id),
-                pool_id=body.pool_id,
+                pool_id=pool_id,
                 lat=body.lat,
                 lng=body.lng,
                 accuracy_m=body.accuracy_m,
                 speed_ms=body.speed_ms,
                 heading=body.heading,
-                recorded_at=datetime.now(UTC),
+                recorded_at=body.recorded_at or datetime.now(UTC),
             )
         )
 
@@ -292,31 +438,52 @@ async def track_order(
     )
     stop = result.scalar_one_or_none()
 
+    partner_id = None
+    partner_name = partner_phone = None
     partner_lat = partner_lng = None
     partner_updated_at = None
     pool_id = stop.pool_id if stop else None
+    order_status = stop.status if stop else None
+    eta = stop.eta if stop else None
 
     if pool_id:
-        # Latest ping from the partner assigned to this pool
         pool = await session.get(DeliveryPool, pool_id)
-        if pool and pool.partner_id:
-            ping_result = await session.execute(
-                select(LocationPing)
-                .where(LocationPing.partner_id == pool.partner_id)
-                .order_by(LocationPing.recorded_at.desc())
-                .limit(1)
-            )
-            ping = ping_result.scalar_one_or_none()
-            if ping:
-                partner_lat = ping.lat
-                partner_lng = ping.lng
-                partner_updated_at = ping.recorded_at
+        if pool:
+            partner_id = pool.partner_id
+            if pool.partner_id:
+                partner = await session.get(DeliveryPartner, pool.partner_id)
+                if partner:
+                    partner_name = partner.name
+                    partner_phone = partner.phone
+                ping_result = await session.execute(
+                    select(LocationPing)
+                    .where(LocationPing.partner_id == pool.partner_id)
+                    .order_by(LocationPing.recorded_at.desc())
+                    .limit(1)
+                )
+                ping = ping_result.scalar_one_or_none()
+                if ping:
+                    partner_lat = ping.lat
+                    partner_lng = ping.lng
+                    partner_updated_at = ping.recorded_at
+
+            if stop and stop.status == StopStatus.DONE:
+                order_status = "DELIVERED"
+            elif pool.status == PoolStatus.IN_PROGRESS:
+                order_status = "IN_TRANSIT"
+            else:
+                order_status = "POOLED"
 
     return TrackOut(
         order_id=order_id,
         pool_id=pool_id,
+        status=order_status,
         stop=_stop_out(stop) if stop else None,
+        partner_id=partner_id,
+        partner_name=partner_name,
+        partner_phone=partner_phone,
         partner_lat=partner_lat,
         partner_lng=partner_lng,
         partner_updated_at=partner_updated_at,
+        eta=eta,
     )
