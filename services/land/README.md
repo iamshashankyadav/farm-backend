@@ -22,7 +22,7 @@ The gateway exposes the service at `/api/v1/land`.
 
 Plot boundaries are GeoJSON Polygon coordinates in `[longitude, latitude]` order (SRID 4326). The service validates the ring, checks PostGIS validity and overlap, and calculates area in acres using geography. Plot photos are owned by media as `ownerType=PLOT`; the private `/internal/geo/plot/{id}` route lets the media worker verify EXIF GPS.
 
-Reservations have a database partial unique index for PENDING, ACCEPTED, ACTIVE and HARVEST_READY, and PENDING requests expire after 48 hours. Deposit payment success activates the reservation. The provisional deposit rate defaults to 20% of the season total and is configurable with `LAND_DEPOSIT_RATE` (0–1); confirm the final policy with the team. `harvest.ready` starts a quality inspection; `quality.graded` moves a passed or lower-grade-accepted harvest to FULFILLING and a re-harvest outcome back to ACTIVE.
+Reservations have a database partial unique index for PENDING, ACCEPTED, ACTIVE and HARVEST_READY, and PENDING requests expire after 48 hours. Deposit payment success activates the reservation. The provisional deposit rate defaults to 20% of the season total and is configurable with `LAND_DEPOSIT_RATE` (0–1); confirm the final policy with the team. `harvest.ready` starts a quality inspection. Each re-harvest increments an attempt number, allowing a fresh inspection and preventing delayed reports from earlier attempts from changing the reservation. `quality.graded` moves a passed or lower-grade-accepted harvest to FULFILLING and a re-harvest outcome back to ACTIVE.
 
 ## Migrations and local run
 
