@@ -11,6 +11,9 @@ dependencies = [
     "asyncpg>=0.29",
     "alembic>=1.13",
     "geoalchemy2>=0.15",
+    "httpx>=0.27",
+    "arq>=0.26",
+    "shapely>=2.0",
 ]
 
 [tool.uv.sources]
@@ -22,3 +25,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/logistics_service"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
