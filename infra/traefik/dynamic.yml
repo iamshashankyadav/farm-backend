@@ -1,0 +1,191 @@
+# Generated shape: one router per service. Every service is reachable at /api/v1/<service>/...
+# (the prefix is stripped before the request reaches the service, and ROOT_PATH makes /docs work).
+# /internal/... routes are answered with 404 here: they exist only on the Docker network.
+http:
+  middlewares:
+    cors:
+      headers:
+        accessControlAllowMethods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+        accessControlAllowHeaders: [Authorization, Content-Type, Idempotency-Key, X-Correlation-ID]
+        accessControlExposeHeaders: [X-Correlation-ID]
+        accessControlAllowOriginList:
+          - http://localhost:5173
+          - http://localhost:4173
+        accessControlMaxAge: 600
+        addVaryHeader: true
+    rate-limit:
+      rateLimit:
+        average: 50
+        burst: 100
+        period: 1s
+    # Stricter limit for sign-in and OTP, which can be guessed at
+    auth-rate-limit:
+      rateLimit:
+        average: 5
+        burst: 10
+        period: 1s
+    block-internal:
+      replacePath:
+        path: /blocked
+    strip-identity:
+      stripPrefix:
+        prefixes: [/api/v1/identity]
+    strip-catalog:
+      stripPrefix:
+        prefixes: [/api/v1/catalog]
+    strip-land:
+      stripPrefix:
+        prefixes: [/api/v1/land]
+    strip-media:
+      stripPrefix:
+        prefixes: [/api/v1/media]
+    strip-quality:
+      stripPrefix:
+        prefixes: [/api/v1/quality]
+    strip-order:
+      stripPrefix:
+        prefixes: [/api/v1/order]
+    strip-logistics:
+      stripPrefix:
+        prefixes: [/api/v1/logistics]
+    strip-notification:
+      stripPrefix:
+        prefixes: [/api/v1/notification]
+
+  routers:
+    identity-internal-blocked:
+      rule: PathRegexp(`^/api/v1/identity/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: identity
+    catalog-internal-blocked:
+      rule: PathRegexp(`^/api/v1/catalog/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: catalog
+    land-internal-blocked:
+      rule: PathRegexp(`^/api/v1/land/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: land
+    media-internal-blocked:
+      rule: PathRegexp(`^/api/v1/media/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: media
+    quality-internal-blocked:
+      rule: PathRegexp(`^/api/v1/quality/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: quality
+    order-internal-blocked:
+      rule: PathRegexp(`^/api/v1/order/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: order
+    logistics-internal-blocked:
+      rule: PathRegexp(`^/api/v1/logistics/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: logistics
+    notification-internal-blocked:
+      rule: PathRegexp(`^/api/v1/notification/internal(/|$)`)
+      priority: 100
+      entryPoints: [web]
+      middlewares: [block-internal]
+      service: notification
+    identity-auth:
+      rule: PathRegexp(`^/api/v1/identity/(login|register|otp/.*|refresh)$`)
+      priority: 50
+      entryPoints: [web]
+      middlewares: [cors, auth-rate-limit, strip-identity]
+      service: identity
+    identity:
+      rule: PathPrefix(`/api/v1/identity`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-identity]
+      service: identity
+    catalog:
+      rule: PathPrefix(`/api/v1/catalog`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-catalog]
+      service: catalog
+    land:
+      rule: PathPrefix(`/api/v1/land`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-land]
+      service: land
+    media:
+      rule: PathPrefix(`/api/v1/media`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-media]
+      service: media
+    quality:
+      rule: PathPrefix(`/api/v1/quality`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-quality]
+      service: quality
+    order:
+      rule: PathPrefix(`/api/v1/order`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-order]
+      service: order
+    logistics:
+      rule: PathPrefix(`/api/v1/logistics`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-logistics]
+      service: logistics
+    notification:
+      rule: PathPrefix(`/api/v1/notification`)
+      priority: 10
+      entryPoints: [web]
+      middlewares: [cors, rate-limit, strip-notification]
+      service: notification
+
+  services:
+    identity:
+      loadBalancer:
+        servers:
+          - url: http://identity:8000
+    catalog:
+      loadBalancer:
+        servers:
+          - url: http://catalog:8000
+    land:
+      loadBalancer:
+        servers:
+          - url: http://land:8000
+    media:
+      loadBalancer:
+        servers:
+          - url: http://media:8000
+    quality:
+      loadBalancer:
+        servers:
+          - url: http://quality:8000
+    order:
+      loadBalancer:
+        servers:
+          - url: http://order:8000
+    logistics:
+      loadBalancer:
+        servers:
+          - url: http://logistics:8000
+    notification:
+      loadBalancer:
+        servers:
+          - url: http://notification:8000
