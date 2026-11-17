@@ -19,7 +19,7 @@ The gateway exposes the service at `/api/v1/quality`.
 - `POST /inspections/{id}/claim` claims an unassigned inspection
 - `POST /inspections/{id}/report` records grade A/B/C, moisture, pest presence, estimated weight, photos and the result
 
-The service consumes `order.packed` and `harvest.ready`. It creates one inspection per subject and assigns the nearest available inspector using PostGIS KNN (`<->`) when a source location is included; an unassigned inspection can be claimed by an inspector. Reports are written with a transactional outbox and publish `quality.graded`. For HARVEST, a failure requires either REHARVEST or ACCEPT_LOWER_GRADE.
+The service consumes `order.packed` and `harvest.ready`. It creates one inspection per order or per harvest attempt and assigns the nearest available inspector using PostGIS KNN (`<->`) when a source location is included; an unassigned inspection can be claimed by an inspector. Reports are written with a transactional outbox and publish `quality.graded`. For HARVEST, a failure requires either REHARVEST or ACCEPT_LOWER_GRADE.
 
 ## Migrations and local run
 
