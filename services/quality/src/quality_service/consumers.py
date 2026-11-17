@@ -29,12 +29,15 @@ def event_point(value):
     return None
 
 
-async def create_inspection(session: AsyncSession, subject_type: str, subject_id: str, location_value=None):
+async def create_inspection(
+    session: AsyncSession, subject_type: str, subject_id: str, location_value=None, attempt: int = 1
+):
     subject_uuid = UUID(str(subject_id))
     existing = await session.scalar(
         select(Inspection).where(
             Inspection.subject_type == subject_type,
             Inspection.subject_id == subject_uuid,
+            Inspection.attempt == attempt,
         )
     )
     if existing is not None:
@@ -53,7 +56,7 @@ async def create_inspection(session: AsyncSession, subject_type: str, subject_id
     if inspector is not None:
         inspector.available = False
     row = Inspection(
-        subject_type=subject_type, subject_id=subject_uuid,
+        subject_type=subject_type, subject_id=subject_uuid, attempt=attempt,
         inspector_id=inspector.inspector_id if inspector is not None else None,
         location=location, status="PENDING",
     )
@@ -79,6 +82,7 @@ async def on_harvest_ready(session: AsyncSession, event: Event) -> None:
         await create_inspection(
             session, "HARVEST", str(reservation_id),
             event.payload.get("plotCentroid") or event.payload.get("location"),
+            attempt=int(event.payload.get("attempt", 1)),
         )
 
 
