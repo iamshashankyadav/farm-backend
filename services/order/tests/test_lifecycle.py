@@ -486,3 +486,51 @@ async def test_a_passed_inspection_with_a_result_makes_the_order_ready(api):
     )
 
     assert await status_of(api, order["id"]) == "READY_FOR_DISPATCH"
+
+
+# --- the feed logistics pools from -------------------------------------------------------------
+
+
+async def ready_order(api, farm=FARM_A) -> dict:
+    order = await api.placed_order(farm)
+    await pack(api, order["id"])
+    await deliver(
+        api, "quality.graded", subjectType="ORDER", subjectId=order["id"], grade="A", result="PASS"
+    )
+    return order
+
+
+async def test_dispatch_feed_lists_ready_orders_in_the_shape_logistics_reads(api):
+    order = await ready_order(api)
+    # the other farm's order of the same checkout is still CONFIRMED: not listed
+
+    response = await api.http.get(
+        "/internal/orders/ready-for-dispatch", params={"date": "2999-01-01"}
+    )
+
+    assert response.status_code == 200
+    (row,) = response.json()
+    assert row == {
+        "order_id": order["id"],
+        "hub_lat": 26.85,
+        "hub_lng": 75.8,
+        "drop_lat": 26.9124,
+        "drop_lng": 75.7873,
+        "weight_kg": 2.0,
+        "address": "12 Green Park, Jaipur, 302001",
+    }
+
+
+async def test_dispatch_feed_respects_the_delivery_date_and_drops_pooled_orders(api):
+    order = await ready_order(api)  # delivery date: tomorrow by default
+
+    too_early = await api.http.get(
+        "/internal/orders/ready-for-dispatch", params={"date": "2000-01-01"}
+    )
+    assert too_early.json() == []
+
+    await deliver(api, "pool.assigned", orderIds=[order["id"]])
+    pooled = await api.http.get(
+        "/internal/orders/ready-for-dispatch", params={"date": "2999-01-01"}
+    )
+    assert pooled.json() == []
