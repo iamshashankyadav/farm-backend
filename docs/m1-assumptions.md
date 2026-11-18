@@ -100,3 +100,8 @@ Read from M7's open PR (#39): `reservation.accepted {reservationId, customerId, 
 - A harvest order without a plot location (`harvest.ready` had none) gets the pickup point `[0, 0]`.
 - `order.packed` is never published for a harvest order: quality would open a second inspection for a harvest that is already graded.
 - Not added: an admin endpoint to refund any payment. Refunds happen on cancel, on a cancelled reservation, on a failed produce inspection, on an overpaid balance and as buy-back credit.
+
+## Added later: feed for the logistics pooling job
+
+Read from M2's logistics code (merged): the pooling job calls `GET {ORDER_SERVICE_URL}/internal/orders/ready-for-dispatch?date=YYYY-MM-DD` and expects a list of `{order_id, hub_lat, hub_lng, drop_lat, drop_lng, weight_kg, address}`. The order service now serves it (`internal.py`, not exposed by the gateway). It lists orders in READY_FOR_DISPATCH due on that day or earlier; `hub_*` is the first item's pickup point, `weight_kg` adds up the item quantities whatever the unit (assumed). Logistics' `pool.assigned` (`orderIds`), `delivery.started` and `delivery.completed` (`orderId`, `orderIds`) match what the order service consumes.
+
