@@ -141,3 +141,36 @@ async def test_distant_orders_separate_pools(
         pools = await run_pooling(POOL_DATE, orders, session_factory, settings)
 
     assert len(pools) == 2
+
+
+@pytest.mark.asyncio
+async def test_pickup_before_drop_ordering(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    """Validate issue #19 constraint: all PICKUP stops precede all DROP stops."""
+    settings = LogisticsSettings(events_enabled=False)
+    orders = [
+        _order(21.101, 81.301, weight=5.0),
+        _order(21.102, 81.302, weight=8.0),
+    ]
+
+    with patch(
+        "logistics_service.pooling.get_route",
+        new=AsyncMock(return_value=_MOCK_ROUTE),
+    ):
+        pools = await run_pooling(POOL_DATE, orders, session_factory, settings)
+
+    assert len(pools) == 1
+    async with session_factory() as session:
+        result = await session.execute(
+            select(PoolStop).where(PoolStop.pool_id == pools[0].id).order_by(PoolStop.seq)
+        )
+        stops = result.scalars().all()
+        # 2 orders -> 4 stops: PICKUP (seq 1), PICKUP (seq 2), DROP (seq 3), DROP (seq 4)
+        assert len(stops) == 4
+        assert [s.seq for s in stops] == [1, 2, 3, 4]
+        assert stops[0].stop_type == "PICKUP"
+        assert stops[1].stop_type == "PICKUP"
+        assert stops[2].stop_type == "DROP"
+        assert stops[3].stop_type == "DROP"
+
