@@ -205,6 +205,23 @@ services:
       <<: *env
       DATABASE_URL: postgresql+asyncpg://farm_logistics:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ROOT_PATH: /api/v1/logistics
+      ORDER_SERVICE_URL: http://order:8000
+
+  logistics-worker:
+    <<: *service
+    build:
+      context: .
+      dockerfile: services/logistics/Dockerfile
+    command: arq logistics_service.worker.WorkerSettings
+    environment:
+      <<: *env
+      DATABASE_URL: postgresql+asyncpg://farm_logistics:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ORDER_SERVICE_URL: http://order:8000
+    depends_on:
+      logistics: {condition: service_started}
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
 
   notification:
     <<: *service
