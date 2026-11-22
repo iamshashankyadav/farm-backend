@@ -5,7 +5,10 @@ from __future__ import annotations
 from uuid import uuid4
 
 from farm_common.events import Event
-from notification_service.consumers import map_event_to_notification
+from notification_service.consumers import (
+    map_event_to_farmer_notification,
+    map_event_to_notification,
+)
 from notification_service.schemas import NotificationType
 
 
@@ -118,3 +121,44 @@ def test_map_unknown_or_missing_customer_returns_none():
 
     event_no_cust = Event(type="order.placed", producer="order", payload={"orderId": "123"})
     assert map_event_to_notification(event_no_cust) is None
+
+
+def _order_event(etype: str, **payload):
+    return Event(
+        type=etype, producer="order", payload={"orderId": str(uuid4()), "total": 120.0, **payload}
+    )
+
+
+def test_farmer_is_told_about_a_new_paid_order():
+    owner, customer = uuid4(), uuid4()
+    event = _order_event("order.placed", customerId=str(customer), farmOwnerId=str(owner))
+    farmer = map_event_to_farmer_notification(event)
+    assert farmer is not None
+    user_id, ntype, title, body, payload = farmer
+    assert user_id == owner
+    assert ntype == NotificationType.ORDER_PLACED
+    assert title == "New order to pack"
+    assert "₹120.00" in body
+    assert payload["orderId"] == event.payload["orderId"]
+    # the customer still gets their own notification from the same event
+    assert map_event_to_notification(event)[0] == customer
+
+
+def test_farmer_is_told_when_an_order_is_cancelled_or_completed():
+    owner = str(uuid4())
+    cancelled = map_event_to_farmer_notification(_order_event("order.cancelled", farmOwnerId=owner))
+    done = map_event_to_farmer_notification(_order_event("order.completed", farmOwnerId=owner))
+    assert cancelled[1] == NotificationType.ORDER_CANCELLED
+    assert done[1] == NotificationType.ORDER_COMPLETED
+    assert "payout" in done[3]
+
+
+def test_no_farmer_notification_without_an_owner_or_for_other_events():
+    assert (
+        map_event_to_farmer_notification(_order_event("order.placed", customerId=str(uuid4())))
+        is None
+    )
+    assert (
+        map_event_to_farmer_notification(_order_event("order.packed", farmOwnerId=str(uuid4())))
+        is None
+    )
