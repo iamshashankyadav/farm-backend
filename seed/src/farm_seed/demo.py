@@ -250,7 +250,7 @@ class Demo:
             self.plot_ids[p_idx] = plot["id"]
             self.s.plots += 1
             seasons = tuple(
-                D.PAST_KHARIF
+                (D.PAST_KHARIF[0], D.PAST_KHARIF[1], today().isoformat())
                 if (n == "Kharif" and p_idx in D.PLOTS_WITH_PAST_KHARIF)
                 else (n, a, b)
                 for n, a, b in D.SEASONS
