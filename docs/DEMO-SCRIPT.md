@@ -12,9 +12,10 @@ Two stories, told in the order the platform was designed for (HLD section 5).
    cauliflower from a second farm, pay. Two orders appear, one per farm. *Say:* one checkout, one order per farm.
 2. **Farmer (web).** Sign in as Ramesh, +919100000001. **Orders → To pack** shows the new order and the stage bar at 2 of 8.
    Open **Notifications**: "New order to pack". Press **Mark packed**; the bar moves to 3.
-3. **Inspector (web, 390 px).** Sign in as Asha, +919300000001. **Inspections → Waiting for an inspector**: claim the packed
-   order, report grade A with a photo. *Say:* the photo keeps its GPS and capture time; the badge says whether it was taken
-   at the farm. Show the listing photo from Verma Organic Farm that is **Unverified** on purpose (6 km away).
+3. **Quality check (no website screen).** The inspector role was removed from the site, so a newly packed order waits at
+   *Packed* until a report is filed through the API (as `journeys.py` does). For a live demo, use an already graded order
+   instead. *Say:* photos keep their GPS and capture time; the badge says whether it was taken at the farm. Show the listing
+   photo from Verma Organic Farm that is **Unverified** on purpose (6 km away).
 4. **Admin (web).** Sign in as +919999999999 (password in DEMO.md). **Dashboard**: orders per day, sales, inspection pass
    rate. **Pooling**: pick today, **Run pooling**; routes appear on the map with kilometres saved against separate trips.
    **Orders → Needs a step**: where anything is stuck. *Say:* an admin can cancel and refund from here.

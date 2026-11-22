@@ -1,5 +1,7 @@
 # Android (Kotlin) hand-off: sync, clean up, redesign, test
 
+> The work is tracked as issues in farm-mobile: start from the tracking issue [#52](https://github.com/lakshayg2005/farm-mobile/issues/52). This file is the brief every issue points to.
+
 Self-contained brief for the Claude Code session that works on the native Android apps in
 `farm-mobile/android/`. Read the whole file first. The backend and the website are being
 fixed in parallel by someone else; your job is the two Android apps only.
@@ -115,7 +117,7 @@ person; log `correlationId`. Codes you must handle: `VALIDATION_ERROR` (422, `de
 | `POST /identity/login` | `phone, password` | returns `accessToken, refreshToken, expiresIn, user` |
 | `POST /identity/otp/request` then `/otp/verify` | `phone` / `phone, code` | dev mode returns the OTP in the request response |
 | `POST /identity/refresh` | `refreshToken` | access token lasts 15 minutes |
-| `GET /identity/me` | | roles: `farmer`, `customer`, `delivery`, `inspector`, `admin` |
+| `GET /identity/me` | | roles: `farmer`, `customer`, `delivery`, `admin` (`inspector` still exists in the backend but has no screens) |
 
 Phones are `+91XXXXXXXXXX`. Customer app requires role `customer`; delivery app requires the
 `delivery` role.
@@ -126,12 +128,15 @@ Phones are `+91XXXXXXXXXX`. Customer app requires role `customer`; delivery app 
 | --- | --- |
 | Browse near me | `GET /catalog/listings/search?lat&lng&radius_km<=100&crop&min_price&max_price&grade&organic&sort&limit&cursor` returns a GeoJSON FeatureCollection |
 | Listing detail and photos | `GET /catalog/listings/{id}`, `GET /media/{mediaId}` |
+| Farm rating | Every listing and search hit carries `farmRating` (average, 1 to 5, `null` until rated) and `farmRatingCount`. Show stars and the count, or "Not rated yet" |
 | Checkout | `POST /order/orders/payments/intent {amount, kind:"FULL"}` then `POST /order/orders` with header `Idempotency-Key` (required) and body `{items[{listingId, qty}], deliveryAddress{..., location}, deliveryDate?, notes?, paymentIntentId}`. Returns a `Checkout` holding one `Order` per farm. Payment failure is HTTP 402; retry with a **new** Idempotency-Key |
 | My orders | `GET /order/orders?limit&cursor`, `GET /order/orders/{id}` (items, events, payments, rating) |
 | Cancel | `POST /order/orders/{id}/cancel` (allowed until QC_PASSED) |
 | Track | `GET /logistics/orders/{orderId}/track` (driver position, ETA, the drop stop and its OTP) |
 | Rate | `POST /order/orders/{id}/rating {score 1-5, comment?}` once COMPLETED |
 | Notifications | `GET /notification/notifications`, `POST .../{id}/read`, `POST .../read-all`, `GET .../unread-count`, `POST .../devices` (push token) |
+
+Notification types a customer can get include the `ORDER_*` family, `PAYMENT_SUCCEEDED`, `RESERVATION_ACCEPTED`, `HARVEST_READY`; farmers also get `LOW_STOCK` and `RATING_RECEIVED` (web only for now).
 
 Order statuses: `PLACED, CONFIRMED, PACKED, QC_PASSED, READY_FOR_DISPATCH, POOLED, IN_TRANSIT,
 DELIVERED, COMPLETED, CANCELLED`. The delivery fee is a flat 20.00 per farm order.
@@ -273,8 +278,8 @@ Any item that fails because of the backend goes in `android/NOTES.md`, not aroun
 ## 9. Demo flows the apps must support
 
 **V1 customer:** sign in, browse nearby produce, add items from two farms, check out, see two
-orders appear and move through packed and graded (the farmer packs on the website and an
-inspector grades there), watch the delivery on the map, confirm with the OTP, rate the order.
+orders appear and move through packed and graded (the farmer packs on the website; the quality check
+is filed through the API, there is no inspector screen on the website), watch the delivery on the map, confirm with the OTP, rate the order.
 
 **V2 customer:** find a plot on the map, reserve a season with a crop, wait for the farmer to
 accept (website), pay the deposit, follow the crop timeline with verified photos, choose delivery
@@ -311,7 +316,7 @@ summary of what works, what is blocked on the backend, and what is next.
 Signature element: the **order status rail**. Orders show an 8-segment bar (Placed, Confirmed,
 Packed, Graded, Ready for dispatch, Pooled, In transit, Delivered): completed segments green, the
 rest `#DFE3E6`, plus the current stage as text under the bar. Order detail shows the same stages
-as a vertical rail with who acts (customer, farmer, inspector, system, partner) and the time. Use
+as a vertical rail with who acts (customer, farmer, quality check, system, partner) and the time. Use
 the same pattern for reservations (Pending, Accepted, Active, Harvest ready, Fulfilling).
 
 Component notes: status chips use text plus a colour dot, never colour alone; screens start with

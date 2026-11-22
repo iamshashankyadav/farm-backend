@@ -18,7 +18,7 @@ Password for every account except the admin: **`Farm@12345`**.
 | Customer | `+919200000001` | Aarav Mishra, Sector 6, Bhilai | Placed orders, one pending land request |
 | Customer | `+919200000005` | Sanjay Dubey, Durg | An active reservation with a crop timeline and photos |
 | Customer | `+919200000008` | Ritu Jain, Kohka, Bhilai | Harvested rice: a delivery order on the pooled routes |
-| Inspector | `+919300000001`, `+919300000002` | Asha Tiwari, Bharat Soni | Open inspections to claim and report with photos |
+| Inspector | `+919300000001`, `+919300000002` | Asha Tiwari, Bharat Soni | No website screens: the role was removed from the site. These accounts let the seed and `journeys.py` file quality reports through the API |
 | Delivery | `+919400000001` to `03` | Deepak Rana, Esha Khan, Farhan Ali | Today's pooled route, pickups and proof of delivery |
 
 All other customers are `+91920000000N` (N = 1 to 10), farmers `+91910000000N` (N = 1 to 8).
@@ -80,7 +80,7 @@ For load and geo-search tests use the generated profile instead: `python -m farm
 1. **Admin:** dashboard numbers, verify Vijay Nishad, open Pooling, pick the biggest route on the map.
 2. **Farmer (Ramesh):** listings with verified photos, pack a waiting order, look at payouts and the rice
    crop timeline.
-3. **Inspector (Asha):** claim a waiting inspection and file a report with a photo.
+3. **Quality check:** the website has no inspector screen. Orders packed during the demo stay at *Packed* until a report is filed through the API (see the quality service docs, or `journeys.py`); the seeded orders are already graded.
 4. **Customer on the web (Sanjay):** search land on the map, open the active reservation and its photo
    timeline.
 5. **Customer app (Aarav):** browse produce, check out, follow an order on the status rail, rate it.
