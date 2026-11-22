@@ -3,6 +3,26 @@
 Shared microservice backend for the Farm Platform: **V1** (selling farm produce) and **V2** (farmland reservation).
 Both teams commit here; the website ([farm-web](https://github.com/lakshayg2005/farm-web)) and the apps ([farm-mobile](https://github.com/lakshayg2005/farm-mobile)) consume its APIs.
 
+## Links
+
+| What | URL |
+| --- | --- |
+| Website, team VM | <http://10.1.75.79:3501> |
+| API gateway, team VM | <http://10.1.75.79:4501/api/v1> (e.g. `/identity/login`, `/catalog/listings/search`) |
+| Swagger UI of one service, team VM | `http://10.1.75.79:4501/api/v1/<service>/docs` |
+| Photo storage, team VM | <http://10.1.75.79:5501> |
+| Website, local | <http://localhost:5173> (`pnpm dev` in farm-web) |
+| API gateway, local | <http://localhost/api/v1> (`docker compose up -d`) |
+| Swagger UI, local | `http://localhost/api/v1/<service>/docs` |
+| RabbitMQ / MinIO console, local | <http://localhost:15672> / <http://localhost:9001> |
+| Backend repo | <https://github.com/lakshayg2005/farm-backend> |
+| Website repo | <https://github.com/lakshayg2005/farm-web> |
+| Apps repo (Kotlin in `android/`) | <https://github.com/lakshayg2005/farm-mobile> |
+
+The team VM is only reachable from the college network or VPN. Demo logins for every role: [docs/DEMO.md](docs/DEMO.md).
+Demo walkthrough: [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). Plan and status: [docs/ROADMAP.md](docs/ROADMAP.md).
+Android work: [docs/android-handoff.md](docs/android-handoff.md), and the prompt to start it: [docs/android-prompt.md](docs/android-prompt.md).
+
 ## Stack
 
 Python 3.12 + FastAPI per service, SQLAlchemy 2 + GeoAlchemy2 + Alembic, PostgreSQL 16 + PostGIS 3 (one schema per service),

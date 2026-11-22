@@ -104,7 +104,7 @@ the tables below are only the parts you need first.
 person; log `correlationId`. Codes you must handle: `VALIDATION_ERROR` (422, `details[]` has
 `field` + `message`), `STOCK_UNAVAILABLE`, `LISTING_NOT_AVAILABLE`, `PAYMENT_FAILED` (402),
 `IDEMPOTENCY_KEY_REUSED`, `IDEMPOTENCY_IN_PROGRESS`, `DEPOSIT_AMOUNT_MISMATCH`,
-`DEPOSIT_ALREADY_PAID`, `RESERVATION_NOT_FOUND`, 401 (refresh the token once, then sign out),
+`DEPOSIT_ALREADY_PAID`, `RESERVATION_NOT_FOUND`, `SEASON_ENDED` (422, reserving a season whose end date has passed), 401 (refresh the token once, then sign out),
 403 (wrong role).
 
 **Auth (`identity`, no token needed):**
