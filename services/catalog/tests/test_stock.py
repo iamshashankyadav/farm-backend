@@ -180,3 +180,42 @@ async def assert_ledger_matches(session_factory) -> None:
         for listing_id, qty, ledger in rows:
             assert qty >= 0
             assert Decimal(qty) == Decimal(ledger), listing_id
+
+
+async def test_low_stock_is_announced_once_when_the_line_is_crossed(api, outbox):
+    listing = await api.listing(qtyAvailable=30, unit="kg")
+
+    await api.reserve(uuid4(), (listing["id"], 5))  # 25 left, still plenty
+    assert await outbox("listing.stock_low") == []
+
+    await api.reserve(uuid4(), (listing["id"], 17))  # 8 left: crosses the 10 kg line
+    await api.reserve(uuid4(), (listing["id"], 2))  # 6 left: already low, no second alert
+
+    events = await outbox("listing.stock_low")
+    assert len(events) == 1
+    payload = events[0].payload
+    assert payload["listingId"] == listing["id"]
+    assert payload["farmerId"] == str(api.farmer_id)
+    assert payload["qtyAvailable"] == 8
+    assert payload["soldOut"] is False
+
+
+async def test_selling_out_pauses_the_listing_and_says_so(api, outbox):
+    listing = await api.listing(qtyAvailable=4, unit="quintal")
+
+    await api.reserve(uuid4(), (listing["id"], 4))
+
+    assert (await api.get(listing["id"]))["status"] == "SOLD_OUT"
+    (event,) = await outbox("listing.stock_low")
+    assert event.payload["soldOut"] is True
+    assert event.payload["qtyAvailable"] == 0
+
+
+async def test_no_alert_when_the_reservation_fails(api, outbox):
+    big = await api.listing(qtyAvailable=12, unit="kg")
+    tiny = await api.listing(qtyAvailable=1, unit="kg")
+
+    response = await api.reserve(uuid4(), (big["id"], 11), (tiny["id"], 2))
+
+    assert response.status_code == 409  # all or nothing: the first line is rolled back too
+    assert await outbox("listing.stock_low") == []

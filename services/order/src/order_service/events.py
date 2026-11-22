@@ -6,6 +6,8 @@ Published (through the outbox, in the same transaction as the status change):
     order.packed              the farmer packed it; quality creates an inspection
     order.ready_for_dispatch  quality passed; logistics can pool it
     order.completed           delivered and closed
+    order.rated               the customer rated a completed order (only orders that have a farm);
+                              catalog keeps each farm's average from these
     payment.succeeded         a payment was taken: a checkout (FULL), a reservation deposit (DEPOSIT,
                               `referenceId` = reservation id; land activates the reservation) or the
                               balance of a harvest order (BALANCE)
@@ -48,6 +50,7 @@ ORDER_PACKED = "order.packed"
 ORDER_READY_FOR_DISPATCH = "order.ready_for_dispatch"
 ORDER_COMPLETED = "order.completed"
 ORDER_CANCELLED = "order.cancelled"
+ORDER_RATED = "order.rated"
 PAYMENT_SUCCEEDED = "payment.succeeded"
 
 QUALITY_GRADED = "quality.graded"
@@ -105,6 +108,17 @@ class OrderCancelledPayload(OrderEventPayload):
     refund_amount: float
 
 
+class OrderRatedPayload(ApiModel):
+    """A customer rated a completed order. Catalog adds `score` to the farm's average."""
+
+    order_id: UUID
+    farm_id: UUID
+    farm_owner_id: UUID | None = None
+    customer_id: UUID
+    score: int
+    comment: str | None = None
+
+
 class PaymentSucceededPayload(ApiModel):
     """A payment went through. Land (#18) activates a reservation when it sees a DEPOSIT with its
     id as `referenceId`. A BALANCE payment also lists the harvest order it settled."""
@@ -126,6 +140,7 @@ PUBLISHED: dict[str, type[ApiModel]] = {
     ORDER_READY_FOR_DISPATCH: OrderEventPayload,
     ORDER_COMPLETED: OrderEventPayload,
     ORDER_CANCELLED: OrderCancelledPayload,
+    ORDER_RATED: OrderRatedPayload,
     PAYMENT_SUCCEEDED: PaymentSucceededPayload,
 }
 

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Payload of the order.rated event (produced by the order service).",
+  "properties": {
+    "orderId": {
+      "format": "uuid",
+      "title": "Orderid",
+      "type": "string"
+    },
+    "farmId": {
+      "format": "uuid",
+      "title": "Farmid",
+      "type": "string"
+    },
+    "farmOwnerId": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Farmownerid"
+    },
+    "customerId": {
+      "format": "uuid",
+      "title": "Customerid",
+      "type": "string"
+    },
+    "score": {
+      "title": "Score",
+      "type": "integer"
+    },
+    "comment": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Comment"
+    }
+  },
+  "required": [
+    "orderId",
+    "farmId",
+    "customerId",
+    "score"
+  ],
+  "title": "order.rated",
+  "type": "object"
+}

@@ -240,6 +240,8 @@ def map_event_to_farmer_notification(
     """
     p = getattr(event, "payload", {}) if not isinstance(event, dict) else event.get("payload", {})
     etype = getattr(event, "type", "") if not isinstance(event, dict) else event.get("type", "")
+    if etype == "listing.stock_low":
+        return _stock_low_notification(p)
     owner = p.get("farmOwnerId")
     if not owner:
         return None
@@ -263,6 +265,17 @@ def map_event_to_farmer_notification(
             f"Order #{short_id} was cancelled. There is nothing to pack.",
             {"orderId": oid},
         )
+    if etype == "order.rated":
+        score = p.get("score")
+        comment = p.get("comment")
+        said = f": \u201c{comment}\u201d" if comment else "."
+        return (
+            UUID(str(owner)),
+            NotificationType.RATING_RECEIVED,
+            f"New rating: {score} of 5",
+            f"A customer rated order #{short_id} {score} of 5{said}",
+            {"orderId": oid, "score": score},
+        )
     if etype == "order.completed":
         return (
             UUID(str(owner)),
@@ -272,6 +285,41 @@ def map_event_to_farmer_notification(
             {"orderId": oid, "total": total},
         )
     return None
+
+
+def _stock_low_notification(
+    p: dict[str, Any],
+) -> tuple[UUID, NotificationType, str, str, dict[str, Any]] | None:
+    farmer = p.get("farmerId")
+    if not farmer:
+        return None
+    crop = (
+        p.get("variety")
+        and f"{p.get('cropName')} ({p['variety']})"
+        or p.get("cropName", "A listing")
+    )
+    left = p.get("qtyAvailable", 0)
+    unit = p.get("unit", "")
+    data = {
+        "listingId": str(p.get("listingId", "")),
+        "qtyAvailable": left,
+        "soldOut": bool(p.get("soldOut")),
+    }
+    if p.get("soldOut"):
+        return (
+            UUID(str(farmer)),
+            NotificationType.LOW_STOCK,
+            f"{crop} is sold out",
+            f"{crop} has no stock left, so buyers no longer see it. Add stock to put it back on sale.",
+            data,
+        )
+    return (
+        UUID(str(farmer)),
+        NotificationType.LOW_STOCK,
+        f"Low stock: {crop}",
+        f"Only {left:g} {unit} of {crop} left. Add stock before it sells out.",
+        data,
+    )
 
 
 def make_event_handler(

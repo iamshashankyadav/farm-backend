@@ -298,6 +298,11 @@ async def test_rating_a_completed_order(api):
     again = await api.http.post(f"/orders/{order_id}/rating", json={"score": 4})
     assert again.status_code == 409
     assert again.json()["error"]["code"] == "ALREADY_RATED"
+    # catalog keeps the farm's average from this one event (and a refused repeat sends nothing)
+    (event,) = await api.outbox("order.rated")
+    assert event.payload["orderId"] == order_id
+    assert event.payload["score"] == 5
+    assert event.payload["farmId"] and event.payload["customerId"]
 
 
 async def test_cannot_rate_before_completion(api):
