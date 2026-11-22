@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     Numeric,
     String,
@@ -61,6 +62,9 @@ class Farm(Base):
     boundary: Mapped[WKBElement | None] = mapped_column(
         Geometry("MULTIPOLYGON", srid=4326, spatial_index=False), nullable=True
     )
+    # Running total of the 1 to 5 scores customers gave this farm's orders (from order.rated events).
+    rating_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    rating_sum: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

@@ -88,6 +88,10 @@ class FarmOut(ApiModel):
     state: str | None
     location: GeoPoint
     boundary: dict[str, Any] | None = Field(description="GeoJSON MultiPolygon, if drawn")
+    rating: float | None = Field(
+        default=None, description="Average score, 1 to 5; null until rated"
+    )
+    rating_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -143,6 +147,10 @@ class ListingFields(ApiModel):
     farm_name: str
     district: str
     village: str | None
+    farm_rating: float | None = Field(
+        default=None, description="The farm's average score, 1 to 5; null until it has been rated"
+    )
+    farm_rating_count: int = 0
     crop_id: str
     crop_name: str
     variety: str | None

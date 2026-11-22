@@ -74,3 +74,44 @@ async def test_handler_works_on_the_bus(api, session_factory):
     )
 
     assert (await api.get(listing["id"]))["qtyAvailable"] == 5
+
+
+async def test_order_rated_builds_the_farm_average(api, session_factory, client):
+    listing = await api.listing()
+    handle = make_handler(session_factory)
+    assert listing["farmRating"] is None and listing["farmRatingCount"] == 0
+
+    for score in (5, 4, 4):
+        await handle(
+            Event(
+                type="order.rated",
+                producer="order",
+                payload={"farmId": listing["farmId"], "score": score, "orderId": str(uuid4())},
+            )
+        )
+    repeated = Event(
+        type="order.rated",
+        producer="order",
+        payload={"farmId": listing["farmId"], "score": 1, "orderId": str(uuid4())},
+    )
+    await handle(repeated)
+    await handle(repeated)  # redelivered: counted once
+
+    after = await api.get(listing["id"])
+    assert after["farmRatingCount"] == 4
+    assert after["farmRating"] == 3.5  # (5 + 4 + 4 + 1) / 4
+    farm = (await client.get(f"/farms/{listing['farmId']}")).json()
+    assert farm["rating"] == 3.5 and farm["ratingCount"] == 4
+
+
+async def test_unusable_rating_events_are_ignored(api, session_factory):
+    listing = await api.listing()
+    handle = make_handler(session_factory)
+    for payload in (
+        {"farmId": listing["farmId"], "score": 9},
+        {"farmId": listing["farmId"], "score": "5"},
+        {"score": 5},
+    ):
+        await handle(Event(type="order.rated", producer="order", payload=payload))
+
+    assert (await api.get(listing["id"]))["farmRating"] is None

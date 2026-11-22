@@ -315,6 +315,21 @@ def v1(run: Run) -> None:
     )
     step("rated; payout recorded and the farmer told")
 
+    rated = wait_for(
+        lambda: (lambda found: found if found["farmRatingCount"] == 1 else None)(
+            run.get(f"/catalog/listings/{listing['id']}", customer["token"])
+        ),
+        "the farm rating to reach the listing",
+        timeout=30,
+    )
+    expect(rated["farmRating"] == 5, f"farm rating should be 5, is {rated['farmRating']}")
+    wait_for(
+        lambda: notified(farmer, "New rating: 5 of 5"),
+        "the farmer's rating notification",
+        timeout=30,
+    )
+    step("the listing shows the farm's rating; the farmer was told")
+
 
 def v2(run: Run) -> None:
     """Customer reserves land, follows the crop and takes the harvest by delivery or buy-back."""

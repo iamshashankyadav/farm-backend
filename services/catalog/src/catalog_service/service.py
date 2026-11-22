@@ -60,6 +60,12 @@ def area_from_db(value: WKBElement | None) -> dict[str, Any] | None:
 # ---- read models ---------------------------------------------------------------------------
 
 
+def average_rating(farm: Farm) -> float | None:
+    if not farm.rating_count:
+        return None
+    return round(farm.rating_sum / farm.rating_count, 1)
+
+
 def farm_out(farm: Farm) -> FarmOut:
     return FarmOut(
         id=farm.id,
@@ -70,6 +76,8 @@ def farm_out(farm: Farm) -> FarmOut:
         state=farm.state,
         location=point_from_db(farm.location),
         boundary=area_from_db(farm.boundary),
+        rating=average_rating(farm),
+        rating_count=farm.rating_count or 0,
         created_at=farm.created_at,
         updated_at=farm.updated_at,
     )
@@ -83,6 +91,8 @@ def listing_fields(listing: Listing) -> dict[str, Any]:
         "farm_name": listing.farm.name,
         "district": listing.farm.district,
         "village": listing.farm.village,
+        "farm_rating": average_rating(listing.farm),
+        "farm_rating_count": listing.farm.rating_count or 0,
         "crop_id": listing.crop_id,
         "crop_name": listing.crop.name,
         "variety": listing.variety,
@@ -138,6 +148,26 @@ def status_for_stock(status: str, qty: Decimal) -> str:
     if status == ListingStatus.SOLD_OUT and qty > 0:
         return ListingStatus.ACTIVE
     return status
+
+
+# A listing is "low" when this much or less is left. Units differ a lot (a quintal is 100 kg), so one
+# number per unit; the farmer is told once, when a reservation takes the stock across the line.
+LOW_STOCK_THRESHOLD: dict[str, Decimal] = {
+    "kg": Decimal(10),
+    "quintal": Decimal(1),
+    "dozen": Decimal(3),
+    "piece": Decimal(10),
+    "bunch": Decimal(10),
+    "litre": Decimal(10),
+}
+
+
+def low_stock_crossed(unit: str, new_qty: Decimal, taken: Decimal) -> bool:
+    """True when taking `taken` moved the stock from above the line to at or below it, or emptied it
+    (selling out is always worth a message, even when the listing was already low)."""
+    line = LOW_STOCK_THRESHOLD.get(unit, Decimal(5))
+    before = new_qty + taken
+    return new_qty <= line < before or new_qty <= 0 < before
 
 
 # ---- events --------------------------------------------------------------------------------
@@ -221,6 +251,7 @@ async def reserve_stock(
 
     short: list[StockUnavailableItem] = []
     changed_status: list[UUID] = []
+    low_stock: list[UUID] = []
     # Fixed order (by id) so two multi-item checkouts can't deadlock each other.
     for listing_id in sorted(wanted):
         qty = wanted[listing_id]
@@ -238,15 +269,19 @@ async def reserve_stock(
                     status=case((new_qty == 0, ListingStatus.SOLD_OUT.value), else_=Listing.status),
                     updated_at=now(),
                 )
-                .returning(Listing.price_per_unit, Listing.status)
+                .returning(
+                    Listing.price_per_unit, Listing.status, Listing.qty_available, Listing.unit
+                )
             )
         ).first()
         if row is None:
             short.append(await _why_not_reserved(session, listing_id, qty))
             continue
-        price, status = row
+        price, status, left, unit = row
         if status != ListingStatus.ACTIVE:
             changed_status.append(listing_id)
+        if low_stock_crossed(unit, left, qty):
+            low_stock.append(listing_id)
         session.add(
             StockMovement(
                 listing_id=listing_id,
@@ -267,6 +302,7 @@ async def reserve_stock(
             details=[s.model_dump(mode="json", by_alias=True) for s in short],
         )
     await _publish_updated(session, changed_status)
+    await _publish_low_stock(session, low_stock)
     await session.flush()
     return await _reserved_items(session, order_id)
 
@@ -370,6 +406,28 @@ async def _publish_updated(session: AsyncSession, listing_ids: list[UUID]) -> No
         listing = await get_listing(session, listing_id)
         await session.refresh(listing)
         publish(session, "listing.updated", listing_payload(listing))
+
+
+async def _publish_low_stock(session: AsyncSession, listing_ids: list[UUID]) -> None:
+    """listing.stock_low: the farmer should restock. `soldOut` is true when nothing is left (the
+    listing then switched itself to SOLD_OUT, and back to ACTIVE when stock returns)."""
+    for listing_id in listing_ids:
+        listing = await get_listing(session, listing_id)
+        await session.refresh(listing)
+        publish(
+            session,
+            "listing.stock_low",
+            {**listing_payload(listing), "soldOut": listing.qty_available <= 0},
+        )
+
+
+async def add_farm_rating(session: AsyncSession, farm_id: UUID, score: int) -> None:
+    """One more score for a farm. A single UPDATE, so concurrent ratings never lose a count."""
+    await session.execute(
+        update(Farm)
+        .where(Farm.id == farm_id)
+        .values(rating_count=Farm.rating_count + 1, rating_sum=Farm.rating_sum + score)
+    )
 
 
 async def set_grade(session: AsyncSession, listing_ids: list[UUID], grade: str) -> int:

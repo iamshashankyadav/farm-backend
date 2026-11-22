@@ -622,6 +622,23 @@ async def rate_order(
         order_id=order.id, customer_id=order.customer_id, score=body.score, comment=body.comment
     )
     session.add(row)
+    if order.farm_id is not None:
+        add_event(
+            session,
+            OutboxEvent,
+            Event(
+                type=ev.ORDER_RATED,
+                producer=ev.PRODUCER,
+                payload=ev.OrderRatedPayload(
+                    order_id=order.id,
+                    farm_id=order.farm_id,
+                    farm_owner_id=order.farm_owner_id,
+                    customer_id=order.customer_id,
+                    score=body.score,
+                    comment=body.comment,
+                ).model_dump(mode="json", by_alias=True),
+            ),
+        )
     try:
         await session.commit()
     except IntegrityError as exc:

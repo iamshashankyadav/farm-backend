@@ -20,6 +20,7 @@ SUBSCRIBED_TOPICS = [
     "quality.*",
     "pool.*",
     "delivery.*",
+    "listing.stock_low",
 ]
 
 

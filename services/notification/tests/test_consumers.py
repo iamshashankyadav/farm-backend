@@ -162,3 +162,55 @@ def test_no_farmer_notification_without_an_owner_or_for_other_events():
         map_event_to_farmer_notification(_order_event("order.packed", farmOwnerId=str(uuid4())))
         is None
     )
+
+
+def _stock_event(**payload):
+    base = {
+        "listingId": str(uuid4()),
+        "farmerId": str(uuid4()),
+        "cropName": "Tomato",
+        "variety": None,
+        "qtyAvailable": 8,
+        "unit": "kg",
+        "soldOut": False,
+    }
+    return {"type": "listing.stock_low", "payload": {**base, **payload}}
+
+
+def test_farmer_is_warned_when_stock_runs_low():
+    event = _stock_event()
+    user_id, ntype, title, body, data = map_event_to_farmer_notification(event)
+    assert str(user_id) == event["payload"]["farmerId"]
+    assert ntype == NotificationType.LOW_STOCK
+    assert title == "Low stock: Tomato"
+    assert "Only 8 kg" in body
+    assert data["soldOut"] is False
+
+
+def test_farmer_is_told_when_a_listing_sells_out():
+    event = _stock_event(qtyAvailable=0, soldOut=True, variety="Hybrid")
+    _, _, title, body, data = map_event_to_farmer_notification(event)
+    assert title == "Tomato (Hybrid) is sold out"
+    assert "Add stock" in body
+    assert data["soldOut"] is True
+
+
+def test_low_stock_without_a_farmer_is_ignored():
+    assert map_event_to_farmer_notification(_stock_event(farmerId=None)) is None
+    # and it never produces a customer notification
+    assert map_event_to_notification(_stock_event()) is None
+
+
+def test_farmer_is_told_about_a_new_rating():
+    owner = str(uuid4())
+    event = {
+        "type": "order.rated",
+        "payload": {"orderId": str(uuid4()), "farmOwnerId": owner, "score": 4, "comment": "Fresh"},
+    }
+    user_id, ntype, title, body, data = map_event_to_farmer_notification(event)
+    assert str(user_id) == owner
+    assert ntype == NotificationType.RATING_RECEIVED
+    assert title == "New rating: 4 of 5"
+    assert "Fresh" in body and data["score"] == 4
+    # the customer who rated is not notified about their own rating
+    assert map_event_to_notification(event) is None
