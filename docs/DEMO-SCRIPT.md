@@ -26,9 +26,9 @@ Two stories, told in the order the platform was designed for (HLD section 5).
 
 1. **Customer (web).** Sanjay, +919200000005, **Find land**: search the map, open a plot, see seasons and the price per kg.
    Try to reserve a season that has ended: the API refuses it ("This season has already ended").
-2. **Farmer (web).** Dinesh, +919100000005, **Requests**: accept the waiting request; the 48 hour timer is visible. The
-   customer pays the deposit and the reservation turns **Active** (this crosses land, order and notification services).
-3. **Crops (farmer).** **Crops**: stage bar Sown, Growing, Flowering, Harvest ready; **Post an update** with a photo.
+2. **Farmer (web).** Sunita Verma, +919100000002, **Requests**: Aarav's request is waiting; the 48 hour timer is visible. Accept it.
+   The customer then pays the deposit and the reservation turns **Active** (this crosses the land and order services).
+3. **Crops (farmer).** Dinesh, +919100000005, **Crops** (his chana and mustard are already growing): stage bar Sown, Growing, Flowering, Harvest ready; **Post an update** with a photo.
 4. **Customer.** **My reservations → Growing**: the same timeline with the farmer's photos. *Say:* the customer follows the
    crop from a phone without calling anyone.
 5. **Harvest.** Open Ritu's finished rice reservation (+919200000008): harvest ready, inspected by Asha, the customer chose
