@@ -12,9 +12,9 @@ verified end to end.
 | 1 | Live audit of every feature against the real backend | Done: findings below |
 | 2 | Sync: fix client bugs, regenerate API types, working photos | Done for the website (farm-web #27) and backend (#64, #66). Mobile fakes are in [android-handoff.md](android-handoff.md) |
 | 3 | Curated demo seed, [DEMO.md](DEMO.md), `scripts/reset-demo.sh` | Done (#65); local stack and the team VM reseeded |
-| 4 | Web redesign, direction C "Ledger" | Done on farm-web PRs #28 to #31 (open); checked at 390 and 1440 px for every role |
-| 5 | Mobile redesign: Kotlin app, handed to the Android session | Brief written, direction C tokens included |
-| 6 | End-to-end tests (Playwright, API flows), screenshots, VM deploy, demo script | Done except the VM deploy: `pnpm e2e` (31 tests, web #30), `farm_seed.journeys` V1 and V2 (backend #68, closes #22), [DEMO-SCRIPT.md](DEMO-SCRIPT.md). Deploy after the PRs merge |
+| 4 | Web redesign, direction C "Ledger" | Done and merged (farm-web #28 to #31); checked at 390 and 1440 px for every role |
+| 5 | Mobile redesign: Kotlin app, handed to the Android session | Brief and copy-paste prompt written ([android-prompt.md](android-prompt.md)), direction C tokens included |
+| 6 | End-to-end tests (Playwright, API flows), screenshots, VM deploy, demo script | Done except the VM deploy: `pnpm e2e` (31 tests, web #30), `farm_seed.journeys` V1 and V2 (backend #68, closes #22), [DEMO-SCRIPT.md](DEMO-SCRIPT.md). All merged on 2026-11-22; VM deploy still to do |
 | 7 | New features | P1 done in code (earnings and inbox web #29, farmer notifications backend #68, admin orders and dashboard web #31). P2 and P3 open |
 
 ## Fixed so far
