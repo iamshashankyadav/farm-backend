@@ -1,5 +1,6 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Response
 from geoalchemy2 import Geography, Geometry
@@ -428,6 +429,14 @@ async def delete_season(
     return Response(status_code=204)
 
 
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def season_has_ended(end_date: date, today: date | None = None) -> bool:
+    """A season can still be reserved on its last day; the day after it is over (India time)."""
+    return end_date < (today or datetime.now(IST).date())
+
+
 @router.post("/reservations", status_code=201, response_model=ReservationOut, tags=["reservations"])
 async def reserve_plot(
     body: ReservationCreate,
@@ -440,6 +449,8 @@ async def reserve_plot(
     plot = await session.get(Plot, season.plot_id)
     if plot is None or plot.status != "ACTIVE":
         raise AppError("PLOT_NOT_FOUND", "Plot not found", 404)
+    if season_has_ended(season.end_date):
+        raise AppError("SEASON_ENDED", "This season has already ended", 422)
     if season.allowed_crops and body.crop_id not in season.allowed_crops:
         raise AppError("CROP_NOT_ALLOWED", "Crop is not allowed in this season", 422)
     row = Reservation(

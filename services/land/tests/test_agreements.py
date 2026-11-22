@@ -70,3 +70,14 @@ async def test_accepting_writes_an_agreement_and_mentions_it_in_the_event(monkey
     assert (agreement.total, agreement.deposit, agreement.balance) == (3000, 600, 2400)
     assert reservation.deposit == 600
     assert published[0].payload["agreementId"] == str(agreement.id)
+
+
+def test_a_season_that_ended_cannot_be_reserved():
+    from datetime import date
+
+    from land_service.routes import season_has_ended
+
+    today = date(2026, 11, 22)
+    assert season_has_ended(date(2026, 11, 21), today)
+    assert not season_has_ended(date(2026, 11, 22), today)  # the last day is still open
+    assert not season_has_ended(date(2027, 3, 31), today)
