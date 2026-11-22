@@ -12,10 +12,10 @@ verified end to end.
 | 1 | Live audit of every feature against the real backend | Done: findings below |
 | 2 | Sync: fix client bugs, regenerate API types, working photos | Done for the website (farm-web #27) and backend (#64, #66). Mobile fakes are in [android-handoff.md](android-handoff.md) |
 | 3 | Curated demo seed, [DEMO.md](DEMO.md), `scripts/reset-demo.sh` | Done (#65); local stack and the team VM reseeded |
-| 4 | Web redesign, direction C "Ledger" | Next |
+| 4 | Web redesign, direction C "Ledger" | Done on farm-web PRs #28 to #31 (open); checked at 390 and 1440 px for every role |
 | 5 | Mobile redesign: Kotlin app, handed to the Android session | Brief written, direction C tokens included |
-| 6 | End-to-end tests (Playwright, API flows), screenshots, VM deploy, demo script | Playwright added to the web repo; tests not written yet |
-| 7 | New features | |
+| 6 | End-to-end tests (Playwright, API flows), screenshots, VM deploy, demo script | Done except the VM deploy: `pnpm e2e` (31 tests, web #30), `farm_seed.journeys` V1 and V2 (backend #68, closes #22), [DEMO-SCRIPT.md](DEMO-SCRIPT.md). Deploy after the PRs merge |
+| 7 | New features | P1 done in code (earnings and inbox web #29, farmer notifications backend #68, admin orders and dashboard web #31). P2 and P3 open |
 
 ## Fixed so far
 
@@ -29,11 +29,12 @@ verified end to end.
 
 ## Still open
 
-- Reserving a season that has already ended is allowed by the API (the demo seed avoids offering them).
-- Admin pooling page says "1 deliveries" (plural form).
+- Reserving an ended season: fixed in backend #69, pooling plural fixed in web #31.
+- Reservation requests send no notification to the farmer (the land service emits no event for a new request).
+- The admin dashboard computes its numbers in the browser from the order list; add a stats endpoint if orders grow into the thousands.
+- Running `farm_seed.journeys` on the demo stack adds "Journey" people and plots; reseed to clear them before presenting.
 - Crop updates show the day they were created, not the photo's capture time.
 - Mobile apps: fake-data fallbacks, mock logins, fabricated reservations (android-handoff.md section 5).
-- Web: no notification inbox, thin admin dashboard, no admin orders or dispute view (Phase 7).
 
 ## Phase 1 findings so far
 
