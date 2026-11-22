@@ -163,9 +163,11 @@ LOW_STOCK_THRESHOLD: dict[str, Decimal] = {
 
 
 def low_stock_crossed(unit: str, new_qty: Decimal, taken: Decimal) -> bool:
-    """True when taking `taken` moved the stock from above the line to at or below it."""
+    """True when taking `taken` moved the stock from above the line to at or below it, or emptied it
+    (selling out is always worth a message, even when the listing was already low)."""
     line = LOW_STOCK_THRESHOLD.get(unit, Decimal(5))
-    return new_qty <= line < new_qty + taken
+    before = new_qty + taken
+    return new_qty <= line < before or new_qty <= 0 < before
 
 
 # ---- events --------------------------------------------------------------------------------

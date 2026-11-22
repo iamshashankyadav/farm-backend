@@ -219,3 +219,13 @@ async def test_no_alert_when_the_reservation_fails(api, outbox):
 
     assert response.status_code == 409  # all or nothing: the first line is rolled back too
     assert await outbox("listing.stock_low") == []
+
+
+async def test_selling_out_after_a_low_stock_warning_alerts_again(api, outbox):
+    listing = await api.listing(qtyAvailable=12, unit="kg")
+
+    await api.reserve(uuid4(), (listing["id"], 3))  # 9 left: low
+    await api.reserve(uuid4(), (listing["id"], 9))  # 0 left: sold out
+
+    flags = [e.payload["soldOut"] for e in await outbox("listing.stock_low")]
+    assert flags == [False, True]
