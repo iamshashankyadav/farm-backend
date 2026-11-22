@@ -1,5 +1,7 @@
 # Prompt for the Android session
 
+> Superseded: the work is now tracked as issues in farm-mobile, starting from [#52](https://github.com/lakshayg2005/farm-mobile/issues/52). Use this prompt only if you want a Claude session to drive those issues.
+
 Copy everything inside the box below into Claude Code, started in an empty working folder. It
 assumes the person has `git`, `gh` (logged in with access to the three repos), JDK 17 or 21 and the
 Android SDK (Android Studio, platform 34 or 35, a Pixel 6 API 34 emulator or a phone).
