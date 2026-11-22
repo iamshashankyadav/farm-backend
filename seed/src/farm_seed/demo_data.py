@@ -448,7 +448,8 @@ PLOTS: tuple[PlotSpec, ...] = (
 )
 
 # Seasons offered to customers all lie ahead. Two plots also keep last Kharif (already harvested), because
-# the harvest and delivery story needs a season that has finished.
+# the harvest and delivery story needs a season that has finished. The land service refuses reservations on
+# a season whose end date has passed, so the seeder gives last Kharif an end date of the day it runs.
 SEASONS = (
     ("Kharif", "2027-06-16", "2027-10-31"),
     ("Rabi", "2026-11-15", "2027-03-31"),
