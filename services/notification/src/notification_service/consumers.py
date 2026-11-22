@@ -230,6 +230,50 @@ def map_event_to_notification(
     return None
 
 
+def map_event_to_farmer_notification(
+    event: Any,
+) -> tuple[UUID, NotificationType, str, str, dict[str, Any]] | None:
+    """The farmer's side of an order event, when the payload names the farm's owner (`farmOwnerId`).
+
+    The customer notification for the same event comes from `map_event_to_notification`; one event can
+    therefore produce two notifications, one for each party.
+    """
+    p = getattr(event, "payload", {}) if not isinstance(event, dict) else event.get("payload", {})
+    etype = getattr(event, "type", "") if not isinstance(event, dict) else event.get("type", "")
+    owner = p.get("farmOwnerId")
+    if not owner:
+        return None
+    oid = str(p.get("orderId", ""))
+    short_id = oid[:8]
+    total = p.get("total")
+    total_str = f" (₹{total:.2f})" if isinstance(total, (int, float)) else ""
+    if etype == "order.placed":
+        return (
+            UUID(str(owner)),
+            NotificationType.ORDER_PLACED,
+            "New order to pack",
+            f"Order #{short_id}{total_str} is paid and waiting for you to pack it.",
+            {"orderId": oid, "total": total},
+        )
+    if etype == "order.cancelled":
+        return (
+            UUID(str(owner)),
+            NotificationType.ORDER_CANCELLED,
+            "Order cancelled",
+            f"Order #{short_id} was cancelled. There is nothing to pack.",
+            {"orderId": oid},
+        )
+    if etype == "order.completed":
+        return (
+            UUID(str(owner)),
+            NotificationType.ORDER_COMPLETED,
+            "Order delivered",
+            f"Order #{short_id} reached the customer. Your payout{total_str} is on its way.",
+            {"orderId": oid, "total": total},
+        )
+    return None
+
+
 def make_event_handler(
     session_factory: async_sessionmaker[AsyncSession],
     settings: NotificationSettings,
@@ -238,45 +282,51 @@ def make_event_handler(
     from farm_common.outbox import mark_processed
 
     async def handle_event(event: Any) -> None:
-        mapped = map_event_to_notification(event)
-        if mapped is None:
+        mapped = [
+            m
+            for m in (map_event_to_notification(event), map_event_to_farmer_notification(event))
+            if m is not None
+        ]
+        if not mapped:
             return
 
-        target_user_id, notif_type, title, body, payload = mapped
         event_id = getattr(event, "event_id", uuid4())
 
-        tokens: list[str] = []
+        pushes: list[tuple[list[str], str, str, dict[str, Any]]] = []
         async with session_factory() as session, session.begin():
             if not await mark_processed(session, ProcessedEvent, event_id):
                 logger.info("Event %s already processed; skipping", event_id)
                 return
 
-            notification = Notification(
-                id=uuid4(),
-                user_id=target_user_id,
-                type=notif_type.value,
-                title=title,
-                body=body,
-                payload=payload,
-                read_at=None,
-            )
-            session.add(notification)
+            for target_user_id, notif_type, title, body, payload in mapped:
+                session.add(
+                    Notification(
+                        id=uuid4(),
+                        user_id=target_user_id,
+                        type=notif_type.value,
+                        title=title,
+                        body=body,
+                        payload=payload,
+                        read_at=None,
+                    )
+                )
+                # Device tokens for the push, read inside the same transaction
+                result = await session.execute(
+                    select(DeviceToken.token).where(DeviceToken.user_id == target_user_id)
+                )
+                pushes.append(([t for (t,) in result.all()], title, body, payload))
 
-            # Query device tokens for push notification
-            result = await session.execute(
-                select(DeviceToken.token).where(DeviceToken.user_id == target_user_id)
-            )
-            tokens = [t for (t,) in result.all()]
-
-        # Dispatch push notification outside DB transaction
-        if tokens and settings.push_enabled:
-            await send_push_notification(
-                tokens=tokens,
-                title=title,
-                body=body,
-                data=payload,
-                expo_push_url=settings.expo_push_url,
-                access_token=settings.expo_access_token,
-            )
+        # Dispatch push notifications outside the DB transaction
+        if settings.push_enabled:
+            for tokens, title, body, payload in pushes:
+                if tokens:
+                    await send_push_notification(
+                        tokens=tokens,
+                        title=title,
+                        body=body,
+                        data=payload,
+                        expo_push_url=settings.expo_push_url,
+                        access_token=settings.expo_access_token,
+                    )
 
     return handle_event

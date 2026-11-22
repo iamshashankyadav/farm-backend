@@ -1,0 +1,54 @@
+name: Journeys
+
+# Boots the whole compose stack on an empty volume and walks the V1 and V2 journeys through the gateway
+# (seed/src/farm_seed/journeys.py). Closes the "V1 order end to end across services" check (#22).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: journeys-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Configure the stack
+        run: |
+          cp .env.example .env
+          uv run python scripts/gen_jwt_keys.py
+      - run: docker compose up -d --build
+      - name: Wait for every service
+        run: |
+          for service in identity catalog land media quality order logistics notification; do
+            for _ in $(seq 1 90); do
+              if curl -fs -o /dev/null "http://localhost/api/v1/$service/health"; then break; fi
+              sleep 2
+            done
+            curl -fs -o /dev/null "http://localhost/api/v1/$service/health"
+          done
+      - name: Create the admin
+        run: |
+          docker compose exec -T identity python -m identity_service.cli create-admin \
+            --name "CI Admin" --phone +919999999999 --password CiAdmin@2026
+      - name: V1 and V2 journeys
+        env:
+          SEED_ADMIN_PHONE: "+919999999999"
+          SEED_ADMIN_PASSWORD: CiAdmin@2026
+        run: uv run --package farm-seed python -m farm_seed.journeys
+      - name: Logs of the stack on failure
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+      - if: always()
+        run: docker compose down -v

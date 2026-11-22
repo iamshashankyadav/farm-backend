@@ -13,6 +13,20 @@ The demo profile needs an **empty** database (it refuses to run if the demo farm
 Photos live in `seed/assets/photos` with their authors and licences in `seed/assets/CREDITS.md`;
 `seed/tools/fetch_photos.py` re-downloads them from Wikimedia Commons.
 
+**Journeys** (`python -m farm_seed.journeys`): two scripted API walks with an assertion at every status change,
+using people created for the run. V1 is listing, order, pack, inspection, pooling, delivery, rating and payout;
+V2 is plot, reservation, deposit, crop update, harvest, inspection, then delivery for one customer and buy-back
+for another. Both also check that customers and farmers are notified. They run in CI (`.github/workflows/journeys.yml`)
+against an empty stack, and take about 15 seconds each locally:
+
+```bash
+SEED_ADMIN_PHONE=+919999999999 SEED_ADMIN_PASSWORD='DemoAdmin@2026' \
+  uv run --package farm-seed python -m farm_seed.journeys            # or --journey v1 / v2
+```
+
+Pooling gives a route to the least loaded delivery partner, so if the stack already has other idle partners the
+V1 journey may stop with a message saying so; run it after `scripts/reset-demo.sh` or on an empty stack.
+
 The rest of this file describes the `volume` profile.
 
 Dummy data simulator. Uses a fixed random seed and calls the gateway API with an admin token, so
