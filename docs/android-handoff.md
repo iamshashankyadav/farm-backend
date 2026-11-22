@@ -126,12 +126,15 @@ Phones are `+91XXXXXXXXXX`. Customer app requires role `customer`; delivery app 
 | --- | --- |
 | Browse near me | `GET /catalog/listings/search?lat&lng&radius_km<=100&crop&min_price&max_price&grade&organic&sort&limit&cursor` returns a GeoJSON FeatureCollection |
 | Listing detail and photos | `GET /catalog/listings/{id}`, `GET /media/{mediaId}` |
+| Farm rating | Every listing and search hit carries `farmRating` (average, 1 to 5, `null` until rated) and `farmRatingCount`. Show stars and the count, or "Not rated yet" |
 | Checkout | `POST /order/orders/payments/intent {amount, kind:"FULL"}` then `POST /order/orders` with header `Idempotency-Key` (required) and body `{items[{listingId, qty}], deliveryAddress{..., location}, deliveryDate?, notes?, paymentIntentId}`. Returns a `Checkout` holding one `Order` per farm. Payment failure is HTTP 402; retry with a **new** Idempotency-Key |
 | My orders | `GET /order/orders?limit&cursor`, `GET /order/orders/{id}` (items, events, payments, rating) |
 | Cancel | `POST /order/orders/{id}/cancel` (allowed until QC_PASSED) |
 | Track | `GET /logistics/orders/{orderId}/track` (driver position, ETA, the drop stop and its OTP) |
 | Rate | `POST /order/orders/{id}/rating {score 1-5, comment?}` once COMPLETED |
 | Notifications | `GET /notification/notifications`, `POST .../{id}/read`, `POST .../read-all`, `GET .../unread-count`, `POST .../devices` (push token) |
+
+Notification types a customer can get include the `ORDER_*` family, `PAYMENT_SUCCEEDED`, `RESERVATION_ACCEPTED`, `HARVEST_READY`; farmers also get `LOW_STOCK` and `RATING_RECEIVED` (web only for now).
 
 Order statuses: `PLACED, CONFIRMED, PACKED, QC_PASSED, READY_FOR_DISPATCH, POOLED, IN_TRANSIT,
 DELIVERED, COMPLETED, CANCELLED`. The delivery fee is a flat 20.00 per farm order.
