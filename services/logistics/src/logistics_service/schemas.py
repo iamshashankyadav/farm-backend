@@ -161,6 +161,16 @@ class OfferPlace(ApiModel):
     address: str | None = None
 
 
+class OfferStop(ApiModel):
+    """One stop of an offered route, in driving order. No address or customer: the partner has
+    not taken the route yet, so they only see where it goes."""
+
+    seq: int
+    stop_type: StopType
+    lat: float
+    lng: float
+
+
 class OfferOut(ApiModel):
     """A pool offered to the signed-in partner, still open (nobody has accepted it)."""
 
@@ -172,6 +182,9 @@ class OfferOut(ApiModel):
     total_km: float | None = None
     distance_km: float | None = Field(None, description="From the partner to the first pickup")
     first_pickup: OfferPlace | None = None
+    stops: list[OfferStop] = Field(
+        default_factory=list, description="Every stop in driving order, to draw the route"
+    )
     offered_at: datetime
     expires_at: datetime | None = Field(
         None, description="Answer by this time; it stays open until someone accepts"
