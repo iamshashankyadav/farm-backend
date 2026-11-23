@@ -33,6 +33,7 @@ extend-immutable-calls = [
     "fastapi.Header",
     "fastapi.Security",
     "farm_common.auth.require_roles",
+    "farm_common.auth.require_verified_farmer",
 ]
 
 [tool.ruff.lint.isort]

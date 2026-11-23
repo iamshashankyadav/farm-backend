@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
       - id: pick
         run: |
-          all='["identity","catalog","land","media","quality","order","logistics","notification"]'
+          all='["identity","catalog","land","media","order","logistics","notification"]'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
           else

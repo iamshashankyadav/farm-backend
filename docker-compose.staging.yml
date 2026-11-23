@@ -206,15 +206,6 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
 
-  quality:
-    <<: *service
-    image: ${IMAGE_REGISTRY:-ghcr.io/lakshayg2005/farm-backend}/quality:${IMAGE_TAG:-latest}
-    command: sh -c "cd services/quality && alembic upgrade head && cd /app && uvicorn quality_service.main:app --host 0.0.0.0 --port 8000"
-    environment:
-      <<: *env
-      DATABASE_URL: postgresql+asyncpg://farm_quality:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      ROOT_PATH: /api/v1/quality
-
   order:
     <<: *service
     image: ${IMAGE_REGISTRY:-ghcr.io/lakshayg2005/farm-backend}/order:${IMAGE_TAG:-latest}

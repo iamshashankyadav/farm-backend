@@ -13,7 +13,7 @@ docker compose down -v
 docker compose up -d ${1:+"$1"}
 
 echo "Waiting for the services to answer..."
-for service in identity catalog land media quality order logistics notification; do
+for service in identity catalog land media order logistics notification; do
   for _ in $(seq 1 90); do
     if curl -fs -o /dev/null "$BASE_URL/$service/health"; then break; fi
     sleep 2

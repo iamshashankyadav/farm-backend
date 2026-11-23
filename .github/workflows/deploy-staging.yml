@@ -24,7 +24,6 @@ jobs:
           - catalog
           - land
           - media
-          - quality
           - order
           - logistics
           - notification

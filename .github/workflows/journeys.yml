@@ -31,7 +31,7 @@ jobs:
       - run: docker compose up -d --build
       - name: Wait for every service
         run: |
-          for service in identity catalog land media quality order logistics notification; do
+          for service in identity catalog land media order logistics notification; do
             for _ in $(seq 1 90); do
               if curl -fs -o /dev/null "http://localhost/api/v1/$service/health"; then break; fi
               sleep 2

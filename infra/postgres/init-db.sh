@@ -5,9 +5,11 @@ set -eu
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
 CREATE EXTENSION IF NOT EXISTS postgis;
+-- land: an exclusion constraint keeps the seasons of one plot from overlapping (uuid in GiST)
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 SQL
 
-for svc in identity catalog land media quality order logistics notification; do
+for svc in identity catalog land media order logistics notification; do
   psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
 CREATE ROLE "farm_${svc}" LOGIN PASSWORD '${POSTGRES_PASSWORD}';
 CREATE SCHEMA "${svc}" AUTHORIZATION "farm_${svc}";

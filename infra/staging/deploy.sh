@@ -42,7 +42,7 @@ echo "=== [3/5] Starting staging infrastructure and services ==="
 docker compose -f docker-compose.staging.yml up -d --remove-orphans
 
 echo "=== [4/5] Waiting for services to become healthy ==="
-SERVICES=(identity catalog land media quality order logistics notification)
+SERVICES=(identity catalog land media order logistics notification)
 
 MAX_RETRIES=30
 RETRY_INTERVAL=3
