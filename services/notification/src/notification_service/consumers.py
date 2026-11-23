@@ -449,6 +449,65 @@ def _stock_low_notification(
     )
 
 
+# Pushed but not kept in the inbox: they only tidy up an earlier notification on the phone.
+PUSH_ONLY = {NotificationType.POOL_OFFER_TAKEN}
+
+
+def map_event_to_partner_notifications(
+    event: Any,
+) -> list[tuple[UUID, NotificationType, str, str, dict[str, Any]]]:
+    """Route offers for delivery partners (one event, many partners).
+
+    pool.offered: every partner offered the route gets POOL_OFFER (nearest first).
+    pool.offer_closed: the partners who did not get it get POOL_OFFER_TAKEN, which carries the same
+    `tag` so the phone replaces the offer notification instead of leaving it there.
+    """
+    etype = getattr(event, "type", "")
+    p = getattr(event, "payload", {}) or {}
+    pool_id = p.get("poolId")
+    if not pool_id:
+        return []
+    tag = f"pool-{pool_id}"
+    if etype == "pool.offered":
+        stops = p.get("stopCount", 0)
+        km = p.get("totalKm") or 0.0
+        place = ((p.get("firstPickup") or {}).get("address")) or "a nearby farm"
+        out = []
+        for offer in p.get("offers") or []:
+            pid = offer.get("partnerId")
+            if not pid:
+                continue
+            away = offer.get("distanceKm")
+            where = f"{away:.1f} km away" if isinstance(away, int | float) else "near you"
+            out.append(
+                (
+                    UUID(str(pid)),
+                    NotificationType.POOL_OFFER,
+                    "New delivery route",
+                    f"{stops} stops, {km:.1f} km. First pickup at {place}, {where}. Accept it before someone else does.",
+                    {
+                        "poolId": pool_id,
+                        "poolDate": p.get("poolDate"),
+                        "tag": tag,
+                        "expiresAt": p.get("expiresAt"),
+                    },
+                )
+            )
+        return out
+    if etype == "pool.offer_closed":
+        return [
+            (
+                UUID(str(pid)),
+                NotificationType.POOL_OFFER_TAKEN,
+                "Route taken",
+                "Another delivery partner accepted this route first.",
+                {"poolId": pool_id, "poolDate": p.get("poolDate"), "tag": tag},
+            )
+            for pid in p.get("partnerIds") or []
+        ]
+    return []
+
+
 def make_event_handler(
     session_factory: async_sessionmaker[AsyncSession],
     settings: NotificationSettings,
@@ -463,7 +522,7 @@ def make_event_handler(
             m
             for m in (map_event_to_notification(event), map_event_to_farmer_notification(event))
             if m is not None
-        ]
+        ] + map_event_to_partner_notifications(event)
         if not mapped:
             return
 
@@ -476,17 +535,18 @@ def make_event_handler(
                 return
 
             for target_user_id, notif_type, title, body, payload in mapped:
-                session.add(
-                    Notification(
-                        id=uuid4(),
-                        user_id=target_user_id,
-                        type=notif_type.value,
-                        title=title,
-                        body=body,
-                        payload=payload,
-                        read_at=None,
+                if notif_type not in PUSH_ONLY:
+                    session.add(
+                        Notification(
+                            id=uuid4(),
+                            user_id=target_user_id,
+                            type=notif_type.value,
+                            title=title,
+                            body=body,
+                            payload=payload,
+                            read_at=None,
+                        )
                     )
-                )
                 # Device tokens for the push, read inside the same transaction
                 result = await session.execute(
                     select(DeviceToken.token).where(DeviceToken.user_id == target_user_id)

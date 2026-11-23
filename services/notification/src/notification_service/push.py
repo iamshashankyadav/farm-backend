@@ -96,7 +96,12 @@ class FcmClient:
                 "data": data,
                 "android": {
                     "priority": "HIGH",
-                    "notification": {"sound": "default"},
+                    # A `tag` makes a later message with the same tag replace this notification
+                    # (a route offer becomes "Route taken" instead of staying on the phone)
+                    "notification": {
+                        "sound": "default",
+                        **({"tag": data["tag"]} if data.get("tag") else {}),
+                    },
                 },
             }
         }

@@ -327,3 +327,48 @@ def test_order_pooled_tells_the_customer_and_pool_assigned_the_partner():
     )
     assert route is not None
     assert route[0] == partner and route[2] == "New route for 2026-11-24"
+
+
+def test_route_offer_goes_to_every_offered_partner_and_taken_replaces_it():
+    from notification_service.consumers import PUSH_ONLY, map_event_to_partner_notifications
+
+    a, b, pool = uuid4(), uuid4(), str(uuid4())
+    offered = map_event_to_partner_notifications(
+        Event(
+            type="pool.offered",
+            producer="logistics",
+            payload={
+                "poolId": pool,
+                "poolDate": "2026-11-24",
+                "stopCount": 4,
+                "totalKm": 12.5,
+                "firstPickup": {"lat": 21.0, "lng": 81.0, "address": "Patan farm"},
+                "offers": [
+                    {"partnerId": str(a), "distanceKm": 1.24},
+                    {"partnerId": str(b), "distanceKm": None},
+                ],
+            },
+        )
+    )
+    assert [o[0] for o in offered] == [a, b]
+    assert all(o[1] == NotificationType.POOL_OFFER for o in offered)
+    assert "1.2 km away" in offered[0][3] and "Patan farm" in offered[0][3]
+    assert "near you" in offered[1][3]
+    assert offered[0][4]["tag"] == f"pool-{pool}" and offered[0][4]["poolId"] == pool
+
+    taken = map_event_to_partner_notifications(
+        Event(
+            type="pool.offer_closed",
+            producer="logistics",
+            payload={"poolId": pool, "partnerIds": [str(b)]},
+        )
+    )
+    assert [(t[0], t[1]) for t in taken] == [(b, NotificationType.POOL_OFFER_TAKEN)]
+    assert taken[0][4]["tag"] == f"pool-{pool}"  # same tag: replaces the offer on the phone
+    assert NotificationType.POOL_OFFER_TAKEN in PUSH_ONLY  # not kept in the inbox
+    assert (
+        map_event_to_partner_notifications(
+            Event(type="pool.assigned", producer="logistics", payload={})
+        )
+        == []
+    )

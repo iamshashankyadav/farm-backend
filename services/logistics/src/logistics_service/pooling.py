@@ -40,6 +40,7 @@ from logistics_service.db import (
     StopStatus,
     StopType,
 )
+from logistics_service.dispatch import offer_pool
 from logistics_service.routing import RouteResult, get_route
 from logistics_service.sequencing import PartnerCandidate, pick_partner, sequence_points
 from logistics_service.settings import LogisticsSettings
@@ -95,6 +96,7 @@ async def _persist_pool(
     route: RouteResult | None,
     depart: datetime,
     partner_id: UUID | None = None,
+    publish_assigned: bool = True,
 ) -> tuple[DeliveryPool, list[PoolStop]]:
     """Write one DeliveryPool + its PoolStop rows, publish pool.assigned.
 
@@ -187,6 +189,8 @@ async def _persist_pool(
         stops.append(drop)
         seq += 1
 
+    if not publish_assigned:
+        return pool, stops  # offered to partners first; pool.assigned goes out on accept
     # Publish pool.assigned (transactional outbox)
     add_event(
         session,
@@ -313,8 +317,29 @@ async def _pool(
         )
 
         async with session_factory() as session, session.begin():
-            partner = await _choose_partner(session, pool_date, (hub_lat, hub_lng))
-            pool, _stops = await _persist_pool(session, pool_date, cluster, route, depart, partner)
+            if settings.dispatch_mode == "offer":
+                # Offer it to nearby partners; the first to accept gets it (dispatch.py)
+                pool, stops = await _persist_pool(
+                    session, pool_date, cluster, route, depart, None, publish_assigned=False
+                )
+                await session.flush()
+                if not await offer_pool(session, pool, stops, settings):
+                    # Nobody to offer it to: publish it unassigned, as before (the first partner
+                    # to confirm a pickup takes it)
+                    add_event(
+                        session,
+                        OutboxEvent,
+                        Event(
+                            type="pool.assigned",
+                            producer="logistics",
+                            payload=_pool_payload(pool, stops),
+                        ),
+                    )
+            else:
+                partner = await _choose_partner(session, pool_date, (hub_lat, hub_lng))
+                pool, _stops = await _persist_pool(
+                    session, pool_date, cluster, route, depart, partner
+                )
         created.append(pool)
 
     logger.info("Created %d pools for %s", len(created), pool_date)
