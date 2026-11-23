@@ -96,7 +96,7 @@ These were found by reading the code; confirm each one before changing it.
 ## 6. Backend cheat sheet
 
 Gateway base: `<host>/api/v1/<service>/...`. Services: `identity`, `catalog`, `land`, `media`,
-`quality`, `order`, `logistics`, `notification`. All JSON is camelCase. Money is rupees as a
+`order`, `logistics`, `notification` (there is no quality service any more). All JSON is camelCase. Money is rupees as a
 number. Places are GeoJSON `{"type":"Point","coordinates":[lng,lat]}` (longitude first).
 Lists paginate with `cursor` / `nextCursor` (order, notification, catalog search) or `offset`
 (plot search). The full request and response shapes are in `farm-backend/contracts/openapi`;
@@ -117,7 +117,7 @@ person; log `correlationId`. Codes you must handle: `VALIDATION_ERROR` (422, `de
 | `POST /identity/login` | `phone, password` | returns `accessToken, refreshToken, expiresIn, user` |
 | `POST /identity/otp/request` then `/otp/verify` | `phone` / `phone, code` | dev mode returns the OTP in the request response |
 | `POST /identity/refresh` | `refreshToken` | access token lasts 15 minutes |
-| `GET /identity/me` | | roles: `farmer`, `customer`, `delivery`, `admin` (`inspector` still exists in the backend but has no screens) |
+| `GET /identity/me` | | roles: `farmer`, `customer`, `delivery`, `admin` (the `inspector` role was removed on 2026-11-23) |
 
 Phones are `+91XXXXXXXXXX`. Customer app requires role `customer`; delivery app requires the
 `delivery` role.
@@ -126,19 +126,19 @@ Phones are `+91XXXXXXXXXX`. Customer app requires role `customer`; delivery app 
 
 | Feature | Call |
 | --- | --- |
-| Browse near me | `GET /catalog/listings/search?lat&lng&radius_km<=100&crop&min_price&max_price&grade&organic&sort&limit&cursor` returns a GeoJSON FeatureCollection |
+| Browse near me | `GET /catalog/listings/search?lat&lng&radius_km<=100&crop&min_price&max_price&organic&sort&limit&cursor` (no `grade`: listings are not graded) returns a GeoJSON FeatureCollection |
 | Listing detail and photos | `GET /catalog/listings/{id}`, `GET /media/{mediaId}` |
 | Farm rating | Every listing and search hit carries `farmRating` (average, 1 to 5, `null` until rated) and `farmRatingCount`. Show stars and the count, or "Not rated yet" |
 | Checkout | `POST /order/orders/payments/intent {amount, kind:"FULL"}` then `POST /order/orders` with header `Idempotency-Key` (required) and body `{items[{listingId, qty}], deliveryAddress{..., location}, deliveryDate?, notes?, paymentIntentId}`. Returns a `Checkout` holding one `Order` per farm. Payment failure is HTTP 402; retry with a **new** Idempotency-Key |
 | My orders | `GET /order/orders?limit&cursor`, `GET /order/orders/{id}` (items, events, payments, rating) |
-| Cancel | `POST /order/orders/{id}/cancel` (allowed until QC_PASSED) |
+| Cancel | `POST /order/orders/{id}/cancel` (allowed until the farmer packs the order) |
 | Track | `GET /logistics/orders/{orderId}/track` (driver position, ETA, the drop stop and its OTP) |
 | Rate | `POST /order/orders/{id}/rating {score 1-5, comment?}` once COMPLETED |
 | Notifications | `GET /notification/notifications`, `POST .../{id}/read`, `POST .../read-all`, `GET .../unread-count`, `POST .../devices` (push token) |
 
 Notification types a customer can get include the `ORDER_*` family, `PAYMENT_SUCCEEDED`, `RESERVATION_ACCEPTED`, `HARVEST_READY`; farmers also get `LOW_STOCK` and `RATING_RECEIVED` (web only for now).
 
-Order statuses: `PLACED, CONFIRMED, PACKED, QC_PASSED, READY_FOR_DISPATCH, POOLED, IN_TRANSIT,
+Order statuses: `PLACED, CONFIRMED, PACKED, READY_FOR_DISPATCH, POOLED, IN_TRANSIT,
 DELIVERED, COMPLETED, CANCELLED`. The delivery fee is a flat 20.00 per farm order.
 
 **Customer, V2 (reserve land):**
@@ -151,10 +151,10 @@ DELIVERED, COMPLETED, CANCELLED`. The delivery fee is a flat 20.00 per farm orde
 | Cancel | `POST /land/reservations/{id}/cancel` |
 | Pay deposit | `POST /order/orders/payments/intent {amount: <reservation.deposit>, kind:"DEPOSIT", referenceId: <reservationId>}`; the amount must equal the deposit exactly. Reservation goes ACTIVE after the event round trip (a few seconds): poll `reservations/mine` |
 | Crop timeline | `GET /land/reservations/{id}/updates` (stage, note, photos, location) |
-| Harvest choice | After the harvest passes inspection: `POST /order/orders/harvest {reservationId, option:"DELIVERY"|"BUYBACK", deliveryAddress?, deliveryDate?}`. DELIVERY joins the normal pooling and tracking; BUYBACK credits 90 % at once and completes |
+| Harvest choice | Once the reservation is FULFILLING (the harvest order exists): `POST /order/orders/harvest {reservationId, option:"DELIVERY"|"BUYBACK", deliveryAddress?, deliveryDate?}`. DELIVERY joins the normal pooling and tracking; BUYBACK charges the balance (price minus deposit), credits 90 % of the harvest value and completes |
 
 Reservation statuses (from `services/land`): `PENDING, ACCEPTED, ACTIVE, HARVEST_READY,
-FULFILLING` (harvest passed inspection, waiting for the customer's delivery or buy-back choice),
+FULFILLING` (harvested; the harvest order exists and waits for the customer's delivery or buy-back choice, then is delivered), `COMPLETED`,
 `REJECTED, CANCELLED, EXPIRED`. Mock payments approve everything except an amount equal to
 the server's `MOCK_PAYMENT_FAIL_AMOUNT`, which is how you demo a payment failure.
 
@@ -174,7 +174,7 @@ Photos need object storage (MinIO). If an upload fails, show the real error and 
 retry; never substitute a made-up media id.
 
 **Events and timing:** the backend is event driven. After a state change, other services catch up
-within a few seconds (reservation activation, order status, inspections, pooling). Screens that
+within a few seconds (reservation activation, order status, pooling). Screens that
 follow such a change need pull-to-refresh and a short, bounded poll, not an assumption that the
 next GET is already updated.
 
@@ -218,7 +218,7 @@ backend (logins and the story are in `farm-backend/docs/DEMO.md`; reset the back
 | # | Feature | Pass condition |
 | --- | --- | --- |
 | 1 | Sign in (OTP and password), register, sign out, token refresh | Wrong role shows a clear message; an expired token refreshes silently |
-| 2 | Browse produce near me, filters, listing detail with photos and grade | Results come from `catalog`; distance and grade are real; empty radius shows an empty state |
+| 2 | Browse produce near me, filters, listing detail with photos and the farm's rating | Results come from `catalog`; distance and rating are real; empty radius shows an empty state |
 | 3 | Cart and checkout across two farms | One `Checkout`, two `Order`s; stock error shows which item; payment failure retries with a new key |
 | 4 | Orders list and detail, status timeline, cancel | Statuses match section 6; cancel only offered while allowed |
 | 5 | Delivery tracking and rating | Driver position and ETA update; rating only after COMPLETED |
@@ -278,8 +278,7 @@ Any item that fails because of the backend goes in `android/NOTES.md`, not aroun
 ## 9. Demo flows the apps must support
 
 **V1 customer:** sign in, browse nearby produce, add items from two farms, check out, see two
-orders appear and move through packed and graded (the farmer packs on the website; the quality check
-is filed through the API, there is no inspector screen on the website), watch the delivery on the map, confirm with the OTP, rate the order.
+orders appear and move through packed (the farmer packs on the website; there is no quality check), watch the delivery on the map, read the delivery code to the partner, rate the order.
 
 **V2 customer:** find a plot on the map, reserve a season with a crop, wait for the farmer to
 accept (website), pay the deposit, follow the crop timeline with verified photos, choose delivery
@@ -314,12 +313,36 @@ summary of what works, what is blocked on the backend, and what is next.
 | Touch targets | at least 48 dp tall; primary buttons 50 dp |
 
 Signature element: the **order status rail**. Orders show an 8-segment bar (Placed, Confirmed,
-Packed, Graded, Ready for dispatch, Pooled, In transit, Delivered): completed segments green, the
+Packed, On a route, In transit, Delivered: six stages): completed segments green, the
 rest `#DFE3E6`, plus the current stage as text under the bar. Order detail shows the same stages
-as a vertical rail with who acts (customer, farmer, quality check, system, partner) and the time. Use
+as a vertical rail with who acts (customer, farmer, system, partner) and the time. Use
 the same pattern for reservations (Pending, Accepted, Active, Harvest ready, Fulfilling).
 
 Component notes: status chips use text plus a colour dot, never colour alone; screens start with
 the serif title and a one-line summary; lists are white cards on the grey background with 1 dp
 borders, no heavy shadows; destructive actions are secondary buttons with an error-coloured label;
 empty states say what to do next. The web mockups are in the shared design canvas (direction C).
+
+## 12. Backend changes of 2026-11-23 the apps must follow
+
+The backend removed the quality gate and fixed several end-to-end defects. The apps keep working, but
+these screens now say things that are no longer true. Nothing here was compiled on the audit machine
+(no Android SDK there), so make the changes in Android Studio and run the unit tests.
+
+| Where | Change |
+| --- | --- |
+| `customer/.../orders/Orders.kt` (status table, `RailStage("QC_PASSED", "Graded", ...)`, stage numbers) | Drop QC_PASSED. Rail: Placed, Confirmed, Packed, On a route, In transit, Delivered (6). READY_FOR_DISPATCH shares the Packed stage; PACKED text "Packed, waiting for a delivery partner". Update `OrdersTest` |
+| `customer/.../orders/Reorder.kt` lines 71-72 | PACKED next step: "a delivery partner collects it"; remove the QC_PASSED line |
+| `customer/.../browse/Browse.kt` (`minGrade`, `gradeMeta`, "Quality inspection pending") and `core/.../api/Services.kt` (`grade` query) | Remove the grade filter and the grade chip: listings have no grade, so every card would say "Ungraded, quality inspection pending". Show the farm rating instead (`farmRating`, `farmRatingCount`) |
+| `customer/.../reservation/Reservation.kt` lines 38-39 | HARVEST_READY: "Harvested. Your harvest order is being prepared." FULFILLING: "Your harvest is ready: choose delivery or buy-back." Add COMPLETED ("Completed") to the labels and stages |
+| Harvest choice screen | Show what each choice costs, from the harvest order (`GET /order/orders/{id}`): DELIVERY pays `balanceDue` plus delivery on arrival; BUYBACK pays `balanceDue` now and is credited 90 % of `total`. A declined balance answers 409 `BALANCE_PAYMENT_FAILED` |
+| `core/.../api/Models.kt` (`INSPECTOR`), `core/.../auth/Auth.kt` line 205 | Remove the inspector role |
+| `core/.../api/Services.kt` line 286 comment | Cancel is allowed until the order is packed |
+| Notifications | New types to route: RESERVATION_REQUESTED, RESERVATION_REJECTED, RESERVATION_CANCELLED, RESERVATION_EXPIRED, RESERVATION_ACTIVATED, CROP_UPDATE (open the reservation), FARMER_VERIFIED. ORDER_QC_PASSED is gone |
+
+Things that start working with no app change: the customer's **delivery code** (the backend now
+generates one per drop and shows it only to the order's customer in `GET /logistics/orders/{id}/track`;
+the partner's route never contains it, and a wrong code answers 422 `INVALID_OTP`), the partner's
+**call customer** button (`customerPhone` is filled from the order's contact phone), and **tracking is
+private** (anyone but the order's customer or an admin gets 404). A drop can no longer be delivered
+before its pickup (409 `PICKUP_FIRST`).

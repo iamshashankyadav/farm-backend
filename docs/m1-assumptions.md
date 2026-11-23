@@ -1,5 +1,18 @@
 # M1 assumptions (order service)
 
+> **Update 2026-11-23 (end-to-end audit).** Several items below are now settled or void:
+> - **No quality gate.** `quality.graded` is gone with the quality service. Packing moves a produce order
+>   PACKED -> READY_FOR_DISPATCH in one step; `QC_PASSED` no longer exists. A customer can cancel until the
+>   order is packed. The `harvest.ready` event creates the harvest order at once for `harvestedQtyKg`
+>   (default `expectedQtyKg`); lower-grade pricing (`GRADE_B/C_PRICE_FACTOR`) is removed.
+> - **`reservation.accepted` carries `total`, `expectedQtyKg` and `pricePerKg`** (and `harvest.ready` carries
+>   `total`), so the harvest price is no longer estimated from the deposit.
+> - **Buy-back charges the balance first** (a BALANCE payment), then credits the customer 90 % (REFUND) and
+>   records the remaining 10 % as the farmer's PAYOUT. It used to credit 90 % with only the deposit paid.
+> - **Dispatch feed** (`/internal/orders/ready-for-dispatch`) also sends `customer_id` and `contact_phone`, and
+>   `weight_kg` converts units to kilograms (a quintal is 100 kg).
+> - `GET /orders` rows carry `ratingScore`.
+
 Decisions made while building the order service that other issues or teams may need to confirm.
 Each one is also marked `TODO(M1)` in the code where it matters. Change the contract here first,
 then in `services/order/src/order_service/schemas.py`, then regenerate

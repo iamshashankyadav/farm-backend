@@ -4,13 +4,27 @@
 
 Lakshay Gupta (Team 2 lead)
 
+> **Decision log (changes made after this design was first agreed)**
+>
+> - **2026-11-23: no quality gate.** Inspections, the inspector role, listing grades and the quality
+>   service were removed. Packing makes a produce order READY\_FOR\_DISPATCH; marking a harvest ready
+>   (with the harvested weight) creates the harvest order at once. Quality is judged by the customer:
+>   proof of delivery (photo and a 4-digit code only the customer sees) and a 1 to 5 rating after
+>   delivery, shown as the farm's average on its listings. The platform now runs seven services.
+> - **2026-11-23: only admin-verified farmers sell.** The access token carries `fv` (farmer verified);
+>   catalog and land refuse farms, listings and plots from unverified farmers (403 FARMER\_NOT\_VERIFIED).
+> - **2026-11-23: seasons of one plot never overlap** (database exclusion constraint), so one piece of
+>   land cannot be let twice for the same days. Ended seasons are not offered.
+> - **Inspectors and admins (section 2):** the website has no inspector role; admins verify farmers,
+>   resolve orders and run pooling.
+
 ## 1. Overview
 
 The platform covers V1 (selling farm produce) and V2 (reserving farmland) on one shared microservice backend. Two teams of four build it: Team 1 builds the mobile apps, Team 2 builds the website, and both teams build backend services.
 
 - **V1:** farmers list produce on the website, customers buy it in the customer app, and delivery partners deliver pooled orders through the delivery app.
 - **V2:** farmers list plots on the website; customers reserve a plot (on the website or in the customer app), pick a crop, and later get the harvest delivered or bought back.
-- **Shared by both:** users, photos, quality checks, orders and delivery pooling are built once and used by V1 and V2.
+- **Shared by both:** users, photos, orders, ratings and delivery pooling are built once and used by V1 and V2.
 
 **Out of scope:** V3 demand forecasting. Order and delivery data is kept so V3 analytics can be added later.
 
@@ -20,14 +34,14 @@ Recommendation: build **three clients, not five**. Merge the V1 customer app and
 
 | Client | Built by | Users | V1 features | V2 features |
 | --- | --- | --- | --- | --- |
-| Website (React + Vite) | Team 2 | Farmers, customers, inspectors, admin | Farmer: list produce with photos, manage stock, accept and pack orders, see quality reports | Farmer: list plots, accept reservations, post crop updates. Customer: map search, reserve a plot, track the crop, choose delivery or buy-back |
+| Website (React + Vite) | Team 2 | Farmers, customers, admin | Farmer: list produce with photos, manage stock, accept and pack orders, see ratings | Farmer: list plots, accept reservations, post crop updates. Customer: map search, reserve a plot, track the crop, choose delivery or buy-back |
 | Customer app (Expo) | Team 1 | Customers | Browse produce near me, cart, checkout, track delivery, rate | Search plots on a map, reserve, follow crop updates, receive the harvest |
 | Delivery app (Expo) | Team 1 | Delivery partners | Today's pooled route, pickup, proof of delivery (photo + OTP) | The same screens deliver harvest orders |
 | Team page | Both | Everyone | Team details and a thank-you to Dr Gagan Sir with his photo, on web and in both apps | Same |
 
 **Backend work is split by domain**, so each team owns the services its clients use most (section 9). Shared foundations (gateway, identity, Docker Compose, CI) are built jointly in the first sprint by one member from each team.
 
-The brief doesn't say where quality inspectors and admins work. This plan puts them on the website, because inspection forms and verification queues are easier on a large screen; a mobile inspector screen can come later.
+The brief doesn't say where admins work. This plan puts them on the website, because verification queues and the pooling map are easier on a large screen. (Quality inspectors were part of the first plan; the quality gate was later removed, see the decision log.)
 
 ## 3. Repository setup and Git workflow
 
@@ -36,7 +50,7 @@ Recommendation: **one GitHub organization with three repos**: a backend monorepo
 | Repo | Owner | Holds |
 | --- | --- | --- |
 | farm-backend | Both teams (each service has an owning team via CODEOWNERS) | All microservices, the API gateway, OpenAPI contracts, event schemas, shared libs, Docker Compose, seed scripts |
-| farm-web | Team 2 | React + Vite website (farmer, customer, inspector and admin sections) |
+| farm-web | Team 2 | React + Vite website (farmer, customer and admin sections) |
 | farm-mobile | Team 1 | Expo monorepo with apps/customer, apps/delivery and shared packages (UI, API client) |
 | farm-docs (optional) | Both | HLD, decision records, meeting notes, final report; the GitHub wiki works too |
 
@@ -48,7 +62,7 @@ Recommendation: **one GitHub organization with three repos**: a backend monorepo
 farm-backend/
   services/
     gateway/  identity/  catalog/  land/  order/
-    quality/  logistics/  media/  notification/
+    logistics/  media/  notification/
   contracts/
     openapi/<service>.json     # exported from FastAPI by CI
     events/<event>.json        # JSON Schema per event
@@ -91,14 +105,13 @@ farm-backend/
 
 ## 4. Actors and roles
 
-Five roles share one identity service; a user's role decides which gateway routes and screens they can reach. One person may hold two roles (a farmer can also be a customer).
+Four roles share one identity service; a user's role decides which gateway routes and screens they can reach. One person may hold two roles (a farmer can also be a customer).
 
 | Role | V1 (produce) | V2 (farmland) | Client |
 | --- | --- | --- | --- |
 | Farmer | Lists produce with photos, sets stock and price, packs orders | Lists plots, accepts reservations, posts crop updates, marks harvest ready | Website |
 | Customer | Browses produce nearby, orders, tracks delivery, rates | Reserves a plot and crop, pays deposit, follows the crop, takes delivery or buy-back | Customer app; website for V2 |
 | Delivery partner | Runs pooled routes, collects pickups, proves delivery | Delivers harvest orders the same way | Delivery app |
-| Quality inspector | Grades produce batches before they can be sold | Grades the harvest before it becomes an order | Website |
 | Admin | Verifies farmers, resolves disputes, runs pooling and data simulation, sees dashboards | Same | Website |
 
 ## 5. Functional requirements
@@ -108,14 +121,14 @@ Every item in the brief maps to an owning service and the client that shows it, 
 | # | Requirement | Version / brief | Service | Client |
 | --- | --- | --- | --- | --- |
 | F1 | Farmer lists produce: crop, variety, quantity, unit price, harvest date, pickup farm, photos | V1 | Catalog | Website |
-| F2 | Customer browses produce within R km, filtered by crop, price, grade and organic | V1, geospatial | Catalog | Customer app |
+| F2 | Customer browses produce within R km, filtered by crop, price and organic, sorted by distance, price or newest | V1, geospatial | Catalog | Customer app |
 | F3 | Customer adds to cart from one or more farms and places an order; stock is reserved | V1, order completion | Order | Customer app |
-| F4 | Farmer accepts and packs the order; the inspector grades the batch before it is dispatched | V1, quality checks | Order, Quality | Website |
+| F4 | Farmer packs the order; packing makes it ready for dispatch. The customer rates it after delivery | V1, quality (by rating) | Order, Catalog | Website |
 | F5 | Farmer lists a plot: boundary polygon, area, soil, water, allowed crops, season windows, price | V2 | Land | Website |
 | F6 | Customer searches plots on a map and reserves a plot-season with a chosen crop | V2, geospatial | Land | Website, customer app |
 | F7 | Farmer accepts the reservation; the customer pays a deposit; one live reservation per plot-season | V2 | Land, Order (payment) | Website, customer app |
 | F8 | Farmer posts crop progress updates with geotagged photos | V2, real photographs | Land, Media | Website |
-| F9 | Harvest is graded, then becomes a delivery or buy-back order | V2, quality checks | Quality, Order | Website, customer app |
+| F9 | The farmer records the harvested weight; it becomes a delivery or buy-back order | V2 | Land, Order | Website, customer app |
 | F10 | Every photo upload keeps its GPS and time; photos taken far from the farm are flagged | Real photographs | Media | All |
 | F11 | Orders run through placed, packed, picked up, delivered and completed, with proof of delivery | Order completion | Order, Logistics | All |
 | F12 | Nearby orders due the same day are pooled into one route per vehicle | Delivery pooling | Logistics | Delivery app, website (admin) |
@@ -149,9 +162,9 @@ flowchart TB
   C[Customer app] --> G
   D[Delivery app] --> G
   G[Traefik gateway /api/v1/service, forward-auth to identity]
-  G --> I[identity] & CA[catalog] & L[land] & M[media] & Q[quality] & O[order] & LG[logistics] & N[notification]
-  I & CA & L & M & Q & O & LG & N <--> MQ{{RabbitMQ farm.events}}
-  I & CA & L & M & Q & O & LG & N --> PG[(PostgreSQL + PostGIS, one schema per service)]
+  G --> I[identity] & CA[catalog] & L[land] & M[media] & O[order] & LG[logistics] & N[notification]
+  I & CA & L & M & O & LG & N <--> MQ{{RabbitMQ farm.events}}
+  I & CA & L & M & O & LG & N --> PG[(PostgreSQL + PostGIS, one schema per service)]
   M --> S3[(MinIO / S3)]
 ```
 
@@ -184,17 +197,16 @@ Decided: **Python + FastAPI for every service, React + TypeScript for the client
 
 ## 9. Services and ownership
 
-Keep it to **eight services plus the gateway**. More services than people would cost more in plumbing than it buys. Each team owns the services its clients use most, so most changes stay inside one team, and each member can own about one service as well as their client screens.
+Keep it to **seven services plus the gateway** (eight in the first plan; quality was removed). More services than people would cost more in plumbing than it buys. Each team owns the services its clients use most, so most changes stay inside one team, and each member can own about one service as well as their client screens.
 
 | Service | Owner | Owns (schema) | Responsibilities | Publishes | Listens to |
 | --- | --- | --- | --- | --- | --- |
 | gateway | Joint | — | Routing, JWT check (forward-auth to identity), rate limits, CORS; a Swagger UI container shows every spec from contracts/openapi | — | — |
 | identity | Joint | users, roles, farmer\_profiles, refresh\_tokens | Sign-up, phone OTP, login, JWT issue, farmer verification | user.registered, farmer.verified | — |
-| catalog (V1) | Team 2 | farms, crops, produce\_listings, stock\_movements | Farm and produce CRUD, geo search, stock reserve and release | listing.published | order.cancelled, quality.graded |
-| land (V2) | Team 2 | plots, plot\_seasons, reservations, agreements, crop\_updates | Plot CRUD, map search, reserve and accept, plot-season lock, crop timeline | reservation.accepted, harvest.ready | payment.succeeded, quality.graded |
+| catalog (V1) | Team 2 | farms, crops, produce\_listings, stock\_movements | Farm and produce CRUD, geo search, stock reserve and release, farm ratings | listing.published, listing.stock\_low | order.cancelled, order.rated |
+| land (V2) | Team 2 | plots, plot\_seasons, reservations, agreements, crop\_updates | Plot CRUD, map search, reserve and accept, plot-season lock, request expiry, crop timeline | reservation.requested / accepted / rejected / cancelled / expired / activated, crop.updated, harvest.ready | payment.succeeded, order.placed / completed / cancelled (harvest orders) |
 | media | Team 2 | media | Signed upload URLs, EXIF and GPS check, thumbnails | media.processed | — |
-| quality | Team 2 | inspections, checklists | Assign the nearest inspector, record grade and photos, pass or fail | quality.graded | harvest.ready, order.packed |
-| order | Team 1 | carts, orders, order\_items, payments, order\_events | V1 cart and checkout, V2 harvest orders, mock payments, order lifecycle | order.placed, order.packed, order.ready\_for\_dispatch, order.cancelled, payment.succeeded, order.completed | reservation.accepted, quality.graded, delivery.completed |
+| order | Team 1 | carts, orders, order\_items, payments, order\_events | V1 cart and checkout, V2 harvest orders, mock payments, order lifecycle | order.placed, order.packed, order.ready\_for\_dispatch, order.cancelled, payment.succeeded, order.completed, order.rated | reservation.accepted, harvest.ready, pool.assigned, delivery.started, delivery.completed |
 | logistics | Team 1 | delivery\_partners, hubs, delivery\_pools, pool\_stops, location\_pings | Pooling, route order, partner assignment, live tracking, proof of delivery | pool.assigned, delivery.completed | order.ready\_for\_dispatch |
 | notification | Team 1 | notifications, device\_tokens | Push, email and in-app inbox | — | All of the above |
 
@@ -212,14 +224,13 @@ Each table lives in its owning service's schema. Other services hold only the ID
 | --- | --- | --- | --- |
 | identity | users | id, name, phone, email, roles\[\], password\_hash, is\_verified | home\_location POINT |
 | catalog | farms | id, farmer\_id, name, village, district | location POINT, boundary MULTIPOLYGON |
-| catalog | produce\_listings | id, farm\_id, crop\_id, variety, qty\_available, unit, price\_per\_unit, harvest\_date, grade, is\_organic, status | pickup\_location POINT |
+| catalog | produce\_listings | id, farm\_id, crop\_id, variety, qty\_available, unit, price\_per\_unit, harvest\_date, is\_organic, status | pickup\_location POINT |
 | catalog | stock\_movements | id, listing\_id, order\_id, delta, reason | — |
 | land | plots | id, farmer\_id, title, area\_acres, soil\_type, water\_source, status | boundary POLYGON, centroid POINT |
 | land | plot\_seasons | id, plot\_id, season, start\_date, end\_date, price, allowed\_crops\[\] | — |
 | land | reservations | id, plot\_season\_id, customer\_id, crop\_id, expected\_qty\_kg, status, deposit, total | — |
 | land | crop\_updates | id, reservation\_id, stage, note, media\_ids\[\] | location POINT |
 | media | media | id, owner\_service, owner\_id, url, thumb\_url, exif\_time, is\_geo\_verified | taken\_at POINT |
-| quality | inspections | id, subject\_type (LISTING / HARVEST), subject\_id, inspector\_id, grade, moisture\_pct, pest\_found, result | location POINT |
 | order | orders | id, type (PRODUCE / HARVEST), customer\_id, source\_id, status, total, delivery\_date | drop\_location POINT |
 | order | order\_items | id, order\_id, listing\_id, farm\_id, qty, unit\_price | pickup\_location POINT |
 | order | payments | id, order\_id or reservation\_id, kind (DEPOSIT / FULL / BALANCE / REFUND), amount, status | — |
@@ -246,14 +257,12 @@ CREATE INDEX plots_centroid_gix  ON land.plots USING GIST (centroid);
 
 ## 11. Order and reservation lifecycles
 
-**V2 (land):** a reservation moves through four live states and becomes a harvest order only when the quality gate passes. The order then ends either in delivery (pooled) or in a buy-back sale.
+**V2 (land):** a reservation moves through its live states and becomes a harvest order when the farmer records the harvest (there is no quality gate). The order then ends either in delivery (pooled) or in a buy-back sale, and the reservation is COMPLETED with it.
 
 ```mermaid
 flowchart LR
   R[Reserved] --> P[Planted] --> G[Growing] --> H[Harvest ready]
-  H --> QG{Quality gate}
-  QG -- pass --> HO[Harvest order]
-  QG -- fail --> X[Rejected / refund policy]
+  H --> HO[Harvest order: harvested kg x agreed price]
   HO --> DL[Pooled delivery]
   HO --> BB[Buy-back sale]
 ```
@@ -263,8 +272,8 @@ flowchart LR
 1. **PLACED:** the customer checks out; order reserves stock in catalog.
 2. **CONFIRMED:** the mock payment succeeds (if it fails, the order is CANCELLED and stock is released).
 3. **PACKED:** the farmer packs the items on the website.
-4. **QC\_PASSED:** the inspector grades the batch. A fail lets the customer accept at the lower grade's price or cancel for a refund.
-5. **READY\_FOR\_DISPATCH → POOLED → IN\_TRANSIT → DELIVERED:** logistics pools the order, and the partner picks up and delivers it with a photo and an OTP.
+4. **READY\_FOR\_DISPATCH:** packing hands the order to logistics at once (QC\_PASSED and the inspection step were removed). A customer can cancel, with a full refund, until the order is packed.
+5. **POOLED → IN\_TRANSIT → DELIVERED:** logistics pools the order, and the partner picks up and delivers it with a photo and the customer's 4-digit code (generated per drop, shown only to the customer).
 6. **COMPLETED:** after delivery the customer can rate; the farmer's payout is recorded.
 
 A state changes only through `UPDATE ... WHERE status = :expected`, so two clients or two event deliveries can't move the same order twice. Every change publishes an event and writes an order\_events row.
@@ -278,15 +287,15 @@ Each flow is a run of gateway calls followed by events. The same calls are made 
 1. Farmer creates a listing on the website: crop, quantity, price, harvest date. Photos are uploaded through media; catalog publishes listing.published.
 2. Customer app calls GET /api/v1/catalog/listings/search with lat, lng and radius; catalog returns the nearest listings with distance.
 3. Customer adds items (possibly from several farms) and checks out with POST /api/v1/orders. Order calls catalog's internal reserve-stock route, then takes the mock payment.
-4. order.placed notifies the farmer, who packs the order on the website. order.packed puts it in the quality queue; once the inspector grades it, order moves to READY\_FOR\_DISPATCH.
+4. order.placed notifies the farmer, who packs the order on the website; packing moves it to READY\_FOR\_DISPATCH.
 5. Logistics pools the order with nearby ones for that day, assigns a partner, and the delivery app shows the route.
 6. The partner delivers with a photo and an OTP. delivery.completed moves the order to COMPLETED, and the customer can rate.
 
-**How one event moves across services (example: quality.graded for a harvest)**
+**How one event moves across services (example: harvest.ready)**
 
-1. Quality saves the inspection and writes quality.graded to its outbox in the same database transaction.
+1. Land marks the reservation HARVEST\_READY and writes harvest.ready to its outbox in the same database transaction.
 2. An outbox relay publishes it to the RabbitMQ topic exchange.
-3. Land marks the reservation as fulfilling; order creates the harvest order; notification pushes the result to the farmer and customer.
+3. Order creates the harvest order and publishes order.placed; land then marks the reservation FULFILLING; notification asks the customer to choose delivery or buy-back.
 4. Each consumer stores the event\_id in processed\_events, so a repeated delivery is ignored.
 
 **Reserve a plot (main V2 flow)**
@@ -303,16 +312,14 @@ Each flow is a run of gateway calls followed by events. The same calls are made 
 2. App uploads the camera image straight to object storage, then calls POST /api/v1/media/{id}/complete.
 3. Worker reads EXIF (time, GPS), makes a thumbnail and checks the GPS point lies within 2 km of the plot (ST\_DWithin). Photos without GPS or outside the radius are shown with an "unverified" badge.
 
-**Crop progress and quality check**
+**Crop progress and harvest**
 
-1. Farmer posts crop updates (sown, growing, flowering, ready) with photos; the customer sees a timeline.
-2. When the farmer marks HARVEST\_READY, the quality service assigns the nearest free inspector (KNN on inspector home\_location).
-3. Inspector submits a report: grade, moisture, pest check, weight estimate and photos taken on site.
-4. Pass → the harvest order is created. Fail → farmer and customer are notified; the customer may accept at a lower grade price, or the farmer re-harvests or refunds as the agreement says.
+1. Farmer posts crop updates (sown, growing, flowering) with geotagged photos; the customer sees a timeline and is notified of each update.
+2. The farmer marks the harvest ready with the weight harvested. The harvest order is created at once at the agreed price per kg for that weight (no quality gate); the customer is asked to choose delivery or buy-back.
 
 **Harvest delivery or buy-back**
 
-1. Customer picks DELIVERY (to their drop location) or BUYBACK (farmer sells the produce and credits the customer).
+1. Customer picks DELIVERY (to their drop location) or BUYBACK (the balance is paid, then the farmer sells the produce and credits the customer 90% of its value).
 2. Delivery orders enter the pooling queue for their delivery date (section 14).
 3. Delivery partner picks up, then marks each stop delivered with a photo and an OTP from the customer.
 4. Balance payment settles and the order and reservation move to COMPLETED; both sides can leave a rating.
@@ -325,7 +332,7 @@ Eight spatial queries cover every location feature in V1 and V2. All of them use
 | --- | --- | --- |
 | Plots within R km of me | ST\_DWithin(centroid::geography, point, R) | Customer search |
 | Plots in the visible map area | boundary && ST\_MakeEnvelope(...) | Map view |
-| Nearest N plots or inspectors | ORDER BY centroid <-> point LIMIT N (KNN) | Search, inspector assignment |
+| Nearest N plots | ORDER BY centroid <-> point LIMIT N (KNN) | Search |
 | Is the photo taken at the plot? | ST\_DWithin(media.taken\_at, plot.boundary, 2000) | Media verification |
 | Do two plots overlap? | ST\_Intersects(new.boundary, existing.boundary) | Plot listing validation |
 | Plot area from the drawn polygon | ST\_Area(boundary::geography) / 4046.86 (acres) | Plot listing |
@@ -374,16 +381,15 @@ All clients call one gateway at /api/v1/\<service>/..., and the gateway forwards
 | GET | /identity/me | Any | Profile and roles |
 | POST | /catalog/farms, /catalog/listings | Farmer | Create a farm and produce listings |
 | PATCH | /catalog/listings/{id} | Farmer | Edit price or stock, pause a listing |
-| GET | /catalog/listings/search?lat&lng&radius\_km&crop&max\_price&grade | Any | Produce near me (V1) |
+| GET | /catalog/listings/search?lat&lng&radius\_km&crop&min\_price&max\_price&organic&sort | Any | Produce near me (V1) |
 | POST | /land/plots, /land/plots/{id}/seasons | Farmer | Plot with GeoJSON boundary, season windows |
 | GET | /land/plots/search?lat&lng&radius\_km&bbox&crop&season | Any | Plots near me or in the map view (V2) |
 | POST | /land/reservations, /land/reservations/{id}/accept, /reject, /cancel | Customer, Farmer | Reservation lifecycle |
-| POST | /land/reservations/{id}/updates, /harvest-ready | Farmer | Crop timeline, trigger quality check |
+| POST | /land/reservations/{id}/updates, /harvest-ready | Farmer | Crop timeline, harvested weight (creates the harvest order) |
 | POST | /orders (from cart), /orders/harvest (from a reservation) | Customer | Place a V1 or V2 order |
 | POST | /orders/{id}/pack, /orders/{id}/cancel | Farmer, Customer | Order state changes |
 | GET | /orders?role&status, /orders/{id} | Any | My orders and their status |
 | POST | /orders/payments/intent, /orders/payments/webhook | Customer, mock gateway | Mock payments |
-| GET, POST | /quality/inspections, /quality/inspections/{id}/report | Inspector | Inspection queue and report |
 | POST | /media/upload-url, /media/{id}/complete | Any | Signed photo upload |
 | GET | /logistics/my-route?date | Delivery partner | Today's pooled route with stops |
 | POST | /logistics/stops/{id}/pickup, /deliver, /logistics/location | Delivery partner | Pickup, proof of delivery, live location |
@@ -406,7 +412,6 @@ A seed tool in farm-backend/seed (uv run python -m seed) builds the same realist
 | Customers | 500 | Home points clustered around nearby towns, so pooling has clusters to find |
 | Produce orders (V1) | 2,000 over 30 days | 1 to 4 items each, from 1 to 2 farms; replayed through every state |
 | Reservations (V2) | 600 in mixed states | Replayed through the state machine so every status appears |
-| Inspections | One per packed order and per harvest | Grade A 60%, B 30%, C 10% |
 | Delivery partners and pools | 30 partners, 14 days of pools | Produced by running the real pooling job |
 | Photos | 30 to 50 real photos | Taken by the team plus openly licensed images (e.g. Wikimedia Commons), reused in dev |
 
@@ -441,7 +446,7 @@ Contracts and shared foundations come first, then V1 and V2 are built in paralle
 | --- | --- | --- | --- |
 | 1 | Contracts, skeleton, common lib, identity | Scaffold, auth pages | App shell, auth screens |
 | 2 | Catalog, order, media, seed V1 | Farmer produce screens | Customer Produce tab, delivery app |
-| 3 | Land, quality, logistics, seed V2 | Land and reservation screens | Customer Land tab, tracking |
+| 3 | Land, logistics, seed V2 (quality was planned here, later removed) | Land and reservation screens | Customer Land tab, tracking |
 | 4 | Hardening, notifications | Admin, team page, polish | Polish, team screen, release |
 
 Each sprint ends with a joint demo.
@@ -455,5 +460,5 @@ Each team member owns about one service plus that service's screens, so work rar
 - [ ] Payments: mock only, or Razorpay in test mode?
 - [ ] Buy-back pricing (V2): fixed at reservation time, or the market price on harvest day?
 - [ ] Cancellation and crop-failure policy: how much of the deposit is refunded, and who bears the loss?
-- [ ] Do inspectors work only on the website, or also need a mobile screen?
+- [x] Do inspectors work only on the website, or also need a mobile screen? Neither: the quality gate was removed (decision log).
 - [ ] Which districts should the simulated data cover?
