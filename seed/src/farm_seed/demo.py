@@ -31,8 +31,8 @@ FAR_AWAY = {("Verma Organic Farm", "cabbage")}
 
 # Orders: (customer index, ((farmer index, crop, qty), ...), fate). A fate is what happens next:
 #   CONFIRMED   left for the farmer to pack          CANCELLED     the customer cancels
-#   WAITING     packed, inspection still open        FAIL_LOWER    inspection failed, lower grade accepted
-#   DISPATCH    inspected and passed, then pooled into routes
+#   WAITING     packed, due tomorrow: waits for tomorrow's route
+#   DISPATCH    packed today, then pooled into today's routes
 ORDERS = (
     (0, ((0, "tomato", 4), (1, "cauliflower", 2)), "DISPATCH"),
     (1, ((0, "tomato", 3), (0, "brinjal", 2)), "DISPATCH"),
@@ -48,7 +48,7 @@ ORDERS = (
     (8, ((3, "guava", 4),), "DISPATCH"),
     (9, ((1, "carrot", 3), (1, "peas", 2)), "DISPATCH"),
     (3, ((2, "potato", 6),), "DISPATCH"),
-    (2, ((4, "chana", 1),), "FAIL_LOWER"),
+    (2, ((4, "chana", 1),), "DISPATCH"),
     (5, ((0, "tomato", 5),), "WAITING"),
     (6, ((5, "okra", 3),), "WAITING"),
     (7, ((2, "onion", 4),), "WAITING"),
@@ -80,7 +80,6 @@ class Summary:
     reservations: int = 0
     crop_updates: int = 0
     orders: int = 0
-    inspections_reported: int = 0
     pools: int = 0
     delivered_orders: int = 0
     ratings: int = 0
@@ -100,7 +99,9 @@ class Demo:
         self.listings: dict[tuple[int, str], str] = {}
         self.plot_ids: dict[int, str] = {}
         self.season_ids: dict[tuple[int, str], str] = {}
-        self.inspector_tokens: dict[str, str] = {}
+        self.customer_of: dict[
+            str, str
+        ] = {}  # order id -> customer phone (reads the delivery code)
         self.partner_phone: dict[str, str] = {}
         self.units = {c["id"]: c["defaultUnit"] for c in gw.call("GET", "/catalog/crops").json()}
 
@@ -131,24 +132,6 @@ class Demo:
             user = _ensure_user(gw, c.name, c.phone, ["customer"], c.lat, c.lng)["user"]
             self.customer_ids.append(user["id"])
             self.s.customers += 1
-        for name, phone, lat, lng in D.INSPECTORS:
-            user = _ensure_user(gw, name, phone, ["customer"], lat, lng)["user"]
-            if "inspector" not in user.get("roles", []):
-                gw.call(
-                    "PUT",
-                    f"/identity/users/{user['id']}/roles",
-                    token=self.admin,
-                    json={"roles": ["inspector"]},
-                )
-            self.tokens.pop(phone, None)  # roles changed: old tokens are revoked
-            token = self.token(phone)
-            gw.call(
-                "PUT",
-                "/quality/inspectors/me/location",
-                token=token,
-                json={"location": _point(lat, lng), "available": True},
-            )
-            self.inspector_tokens[user["id"]] = token
         for name, phone in D.PARTNERS:
             partner = _ensure_user(gw, name, phone, ["delivery"])["user"]
             self.partner_phone[partner["id"]] = phone
@@ -249,12 +232,19 @@ class Demo:
             ).json()
             self.plot_ids[p_idx] = plot["id"]
             self.s.plots += 1
-            seasons = tuple(
-                (D.PAST_KHARIF[0], D.PAST_KHARIF[1], today().isoformat())
-                if (n == "Kharif" and p_idx in D.PLOTS_WITH_PAST_KHARIF)
-                else (n, a, b)
-                for n, a, b in D.SEASONS
-            )
+            seasons = D.SEASONS
+            if p_idx in D.PLOTS_WITH_PAST_KHARIF:
+                # The harvested Kharif ends today (land refuses a season that has ended), so this
+                # plot's Rabi starts tomorrow: seasons of one plot must not overlap.
+                tomorrow = today() + timedelta(days=1)
+                seasons = tuple(
+                    (D.PAST_KHARIF[0], D.PAST_KHARIF[1], today().isoformat())
+                    if n == "Kharif"
+                    else (n, max(a, tomorrow.isoformat()), b)
+                    if n == "Rabi"
+                    else (n, a, b)
+                    for n, a, b in D.SEASONS
+                )
             for name, start, end in seasons:
                 season = gw.call(
                     "POST",
@@ -346,45 +336,20 @@ class Demo:
                 )
                 self.s.crop_updates += 1
             if r.stage in ("HARVEST_READY", "HARVESTED"):
-                gw.call("POST", f"/land/reservations/{rid}/harvest-ready", token=f_token)
+                gw.call(
+                    "POST",
+                    f"/land/reservations/{rid}/harvest-ready",
+                    token=f_token,
+                    json={"harvestedQtyKg": round(r.qty_kg * 0.97)},
+                )
             if r.stage == "HARVESTED":
                 harvested[rid] = (customer, spec)
         return harvested
 
     def finish_harvests(self, harvested: dict[str, tuple[D.Customer, D.PlotSpec]]) -> None:
-        """Inspector passes the harvest, then the customer chooses delivery: it joins the pooled routes."""
-        gw = self.gw
-        for rid, (customer, plot) in harvested.items():
-            found: dict = {}
-
-            def has_inspection(rid: str = rid, found: dict = found) -> bool:
-                rows = gw.call("GET", "/quality/inspections", token=self.admin).json()
-                match = [x for x in rows if x["subjectType"] == "HARVEST" and x["subjectId"] == rid]
-                found.update(match[0] if match else {})
-                return bool(match)
-
-            if not _wait(has_inspection, 60):
-                self.s.notes.append(f"harvest {rid} got no inspection")
-                continue
-            token = self.inspector_tokens.get(found.get("inspectorId") or "", self.admin)
-            media = self.staff_photo(
-                token, "inspection", "INSPECTION", found["id"], plot.lat, plot.lng, 3
-            )
-            gw.call(
-                "POST",
-                f"/quality/inspections/{found['id']}/report",
-                token=token,
-                json={
-                    "grade": "A",
-                    "moisturePct": 12.0,
-                    "pestFound": False,
-                    "weightKg": 780,
-                    "result": "PASS",
-                    "note": "Clean, well dried grain. Weight matches the reservation.",
-                    "mediaIds": [media],
-                },
-            )
-            self.s.inspections_reported += 1
+        """The harvest order exists as soon as the farmer marks the harvest ready (no quality gate);
+        the customer chooses delivery and it joins the pooled routes."""
+        for rid, (customer, _plot) in harvested.items():
             deadline = time.monotonic() + 60
             while True:
                 made = self.gw.call(
@@ -401,6 +366,7 @@ class Demo:
                 )
                 if made.status_code in (200, 201):
                     self.s.orders += 1
+                    self.customer_of[made.json()["id"]] = customer.phone
                     break
                 if time.monotonic() > deadline:
                     self.s.notes.append(
@@ -441,7 +407,10 @@ class Demo:
                         for f, crop, qty in lines
                     ],
                     "deliveryAddress": self._address(customer),
-                    "deliveryDate": today().isoformat(),
+                    # WAITING orders are due tomorrow, so today's pooling leaves them waiting
+                    "deliveryDate": (
+                        today() + timedelta(days=1 if fate == "WAITING" else 0)
+                    ).isoformat(),
                     "paymentIntentId": intent["id"],
                 },
             ).json()
@@ -454,13 +423,14 @@ class Demo:
                         "customer": c_idx,
                     }
                 )
+                self.customer_of[order["id"]] = customer.phone
                 self.s.orders += 1
         return placed
 
     def lifecycle(self, placed: list[dict]) -> None:
-        """Pack, cancel and inspect so every queue and every status has something in it."""
+        """Pack and cancel so every queue and every status has something in it. Packing makes an
+        order ready for dispatch (there is no quality gate)."""
         gw = self.gw
-        packed: list[dict] = []
         for o in placed:
             if o["fate"] == "CONFIRMED":
                 continue
@@ -477,53 +447,20 @@ class Demo:
                 f"/order/orders/{o['id']}/pack",
                 token=self.token(D.FARMERS[o["farmer"]].phone),
             )
-            packed.append(o)
 
-        def inspections() -> dict[str, dict]:
-            rows = gw.call("GET", "/quality/inspections", token=self.admin).json()
-            return {r["subjectId"]: r for r in rows if r["subjectType"] == "ORDER"}
-
-        wanted = {o["id"] for o in packed}
-        if not _wait(lambda: wanted <= inspections().keys(), 90):
-            self.s.notes.append(
-                "not every packed order got an inspection in time (is RabbitMQ up?)"
-            )
-        found = inspections()
-        for o in packed:
-            inspection = found.get(o["id"])
-            if inspection is None or o["fate"] == "WAITING" or inspection["status"] != "PENDING":
-                continue
-            token = self.inspector_tokens.get(inspection.get("inspectorId") or "", self.admin)
-            lat, lng = self.farm_points[o["farmer"]]
-            media = self.staff_photo(
-                token, "inspection", "INSPECTION", inspection["id"], lat + 0.0003, lng, 0
-            )
-            report = {
-                "grade": "A",
-                "moisturePct": 11.5,
-                "pestFound": False,
-                "weightKg": 20,
-                "result": "PASS",
-                "note": "Fresh, clean and correctly packed.",
-                "mediaIds": [media],
-            }
-            if o["fate"] == "FAIL_LOWER":
-                report.update(
-                    result="FAIL",
-                    grade="B",
-                    note="Some grains are damaged. The buyer accepted a lower grade.",
-                    resolution="ACCEPT_LOWER_GRADE",
-                    acceptedGrade="C",
-                )
-            gw.call(
-                "POST", f"/quality/inspections/{inspection['id']}/report", token=token, json=report
-            )
-            self.s.inspections_reported += 1
+    def delivery_code(self, order_id: str) -> str:
+        """Only the order's customer sees the code they read out to the partner."""
+        phone = self.customer_of.get(order_id)
+        if phone is None:
+            raise SeedError(f"no customer known for order {order_id}")
+        track = self.gw.call(
+            "GET", f"/logistics/orders/{order_id}/track", token=self.token(phone)
+        ).json()
+        return (track.get("stop") or {}).get("otp") or ""
 
     def deliveries(self, placed: list[dict]) -> None:
         """The real pooling job, then partners work the routes: one finished, one in progress, the rest waiting."""
         gw = self.gw
-        time.sleep(5)  # let quality.graded move the passed orders to READY_FOR_DISPATCH
         due = today().isoformat()
         pools: list[dict] = []
 
@@ -560,7 +497,7 @@ class Demo:
                     token=token,
                     json={
                         "photoMediaId": media,
-                        "otp": stop.get("otp") or "0000",
+                        "otp": self.delivery_code(stop["orderId"]),
                         "notes": "Handed over at the door.",
                     },
                 )

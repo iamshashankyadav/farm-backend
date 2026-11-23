@@ -34,4 +34,3 @@ Photos from Wikimedia Commons under open licences, resized to 1024 px. Keep this
 | farm_2 | [Village Fields (16596769371).jpg](https://commons.wikimedia.org/wiki/File:Village_Fields_(16596769371).jpg) | Mike Prince from Bangalore, India | CC BY 2.0 |
 | farm_3 | [Carrot Cabbage Fields Hullathy Nilgiris Dec24 A7CR 05419.jpg](https://commons.wikimedia.org/wiki/File:Carrot_Cabbage_Fields_Hullathy_Nilgiris_Dec24_A7CR_05419.jpg) | Timothy A. Gonsalves | CC BY-SA 4.0 |
 | delivery | [Tomatos ready for dispatch.jpg](https://commons.wikimedia.org/wiki/File:Tomatos_ready_for_dispatch.jpg) | Phadke09 | CC BY-SA 4.0 |
-| inspection | [Tomatoes Fresh from Crates, Northern Ghana.jpg](https://commons.wikimedia.org/wiki/File:Tomatoes_Fresh_from_Crates,_Northern_Ghana.jpg) | Ibn Shiraz | CC BY-SA 4.0 |

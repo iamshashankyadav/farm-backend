@@ -1,8 +1,8 @@
 """Scripted API journeys V1 and V2 (HLD section 5): every step goes through the gateway and every state
 change is asserted, so a broken hand-off between two services fails here instead of in the demo.
 
-    V1  listing -> order -> pack -> inspection -> pooling -> delivery -> COMPLETED -> rating
-    V2  plot -> reservation -> deposit -> crop update -> harvest -> inspection -> delivery or buy-back
+    V1  verified farmer -> listing -> order -> pack -> pooling -> delivery code -> COMPLETED -> rating
+    V2  plot -> reservation -> deposit -> crop update -> harvest -> delivery (pooled) or buy-back
 
 Each run creates its own people (phones carry a run id), so it can run against an empty stack in CI or
 against the demo data. Pooling assigns a route to the least loaded delivery partner, so on a stack that
@@ -73,28 +73,13 @@ class Run:
     def person(
         self, label: str, prefix: int, n: int, roles: list[str], lat: float, lng: float
     ) -> dict:
-        """Registers (grants staff roles through the admin) and signs in. Returns user, token, phone."""
+        """Registers, has the admin verify a farmer, and signs in. Returns user, token, phone."""
         phone = self.phone(prefix, n)
-        first = ["customer" if r == "inspector" else r for r in roles]
-        tokens = _ensure_user(self.gw, f"Journey {label}", phone, first, lat, lng)
+        tokens = _ensure_user(self.gw, f"Journey {label}", phone, roles, lat, lng)
         user = tokens["user"]
         if "farmer" in roles:
             self.gw.call("POST", f"/identity/users/{user['id']}/verify-farmer", token=self.admin)
-        if "inspector" in roles:
-            self.gw.call(
-                "PUT",
-                f"/identity/users/{user['id']}/roles",
-                token=self.admin,
-                json={"roles": ["inspector"]},
-            )
-        tokens = self.gw.login(phone, PASSWORD)  # a new token carries the new roles
-        if "inspector" in roles:
-            self.gw.call(
-                "PUT",
-                "/quality/inspectors/me/location",
-                token=tokens["accessToken"],
-                json={"location": _point(lat, lng), "available": True},
-            )
+            tokens = self.gw.login(phone, PASSWORD)  # a new token says the farmer is verified
         return {"id": user["id"], "token": tokens["accessToken"], "phone": phone}
 
     def get(self, path: str, token: str) -> dict | list:
@@ -112,52 +97,101 @@ class Run:
     def photo(self, token: str, key: str, owner: str, owner_id: str, lat: float, lng: float) -> str:
         return photos.upload(self.gw, token, key, owner, owner_id, lat, lng, 0)
 
-    def inspection_for(self, subject_type: str, subject_id: str) -> dict:
-        def find():
-            rows = self.get("/quality/inspections", self.admin)
-            return next(
-                (
-                    r
-                    for r in rows
-                    if r["subjectType"] == subject_type and r["subjectId"] == subject_id
-                ),
-                None,
-            )
+    def notified(self, user: dict, title: str) -> bool:
+        rows = self.get("/notification/notifications?limit=50", user["token"])["items"]
+        return any(n["title"] == title for n in rows)
 
-        return wait_for(find, f"the {subject_type.lower()} inspection to be created")
+    def deliver(self, order_id: str, customer: dict, partner: dict, others: dict) -> None:
+        """Pool today's orders, then the partner collects and delivers this one with the code the
+        customer reads out. Checks that only the customer sees the code."""
+        gw, due, stops = self.gw, today().isoformat(), []
 
-    def report(
-        self, inspection: dict, inspector: dict, lat: float, lng: float, weight: float
-    ) -> None:
-        token = (
-            inspector["token"] if inspection.get("inspectorId") == inspector["id"] else self.admin
+        def pooled() -> bool:
+            gw.call("POST", f"/logistics/pools/run?pool_date={due}", token=self.admin)
+            for pool in gw.call(
+                "GET", f"/logistics/pools?pool_date={due}", token=self.admin
+            ).json():
+                if any(s["orderId"] == order_id for s in pool["stops"]):
+                    expect(
+                        pool.get("partnerId") in (None, partner["id"]),
+                        "the route went to another idle delivery partner; run on a stack without "
+                        "other idle partners (empty CI stack)",
+                    )
+                    stops[:] = [s for s in pool["stops"] if s["orderId"] == order_id]
+                    return True
+            return False
+
+        wait_for(pooled, "the pooling job to include the order", timeout=60, interval=3)
+        expect(all(s["otp"] is None for s in stops), "the admin's pool list shows a delivery code")
+        wait_for(
+            lambda: self.get(f"/order/orders/{order_id}", customer["token"])["status"] == "POOLED",
+            "the order to become POOLED",
         )
-        media = self.photo(token, "inspection", "INSPECTION", inspection["id"], lat, lng)
-        self.gw.call(
+        track = self.get(f"/logistics/orders/{order_id}/track", customer["token"])
+        code = (track.get("stop") or {}).get("otp")
+        expect(code and len(code) == 4, f"the customer sees no delivery code: {track}")
+        stranger = gw.call(
+            "GET", f"/logistics/orders/{order_id}/track", token=others["token"], ok=(404,)
+        )
+        expect(stranger.status_code == 404, "another customer could track this order")
+        route = self.get("/logistics/my-route", partner["token"])
+        expect(all(s["otp"] is None for s in route["stops"]), "the partner sees the delivery code")
+
+        for stop in (s for s in stops if s["stopType"] == "PICKUP"):
+            gw.call(
+                "POST", f"/logistics/stops/{stop['id']}/pickup", token=partner["token"], json={}
+            )
+        drop = next(s for s in stops if s["stopType"] == "DROP")
+        expect(drop.get("customerPhone"), "the partner has no phone number for the customer")
+        proof = self.photo(
+            partner["token"], "delivery", "DELIVERY", drop["id"], drop["lat"], drop["lng"]
+        )
+        wrong = str((int(code) + 1) % 10_000).zfill(4)
+        refused = gw.call(
             "POST",
-            f"/quality/inspections/{inspection['id']}/report",
-            token=token,
-            json={
-                "grade": "A",
-                "moisturePct": 11.0,
-                "pestFound": False,
-                "weightKg": weight,
-                "result": "PASS",
-                "note": "Journey test: passed.",
-                "mediaIds": [media],
-            },
+            f"/logistics/stops/{drop['id']}/deliver",
+            token=partner["token"],
+            json={"photoMediaId": proof, "otp": wrong},
+            ok=(422,),
+        )
+        expect(refused.json()["error"]["code"] == "INVALID_OTP", "a wrong code was accepted")
+        gw.call(
+            "POST",
+            f"/logistics/stops/{drop['id']}/deliver",
+            token=partner["token"],
+            json={"photoMediaId": proof, "otp": code, "notes": "Journey test."},
+        )
+        wait_for(
+            lambda: (
+                self.get(f"/order/orders/{order_id}", customer["token"])["status"] == "COMPLETED"
+            ),
+            "the order to become COMPLETED",
+            timeout=45,
         )
 
 
 def v1(run: Run) -> None:
-    """Customer buys produce: order, pack, grade, pool, deliver, complete, rate."""
+    """Customer buys produce: order, pack, pool, deliver with a code, complete, rate."""
     gw = run.gw
     lat, lng = 21.19 + run.rng.random() * 0.01, 81.28 + run.rng.random() * 0.01
+    waiting = _ensure_user(gw, "Journey Unverified", run.phone(1, 9), ["farmer"], lat, lng)
+    refused = gw.call(
+        "POST",
+        "/catalog/farms",
+        token=waiting["accessToken"],
+        json={"name": "Not yet", "district": "Durg", "location": _point(lat, lng)},
+        ok=(403,),
+    )
+    expect(
+        refused.json()["error"]["code"] == "FARMER_NOT_VERIFIED",
+        "an unverified farmer could open a farm",
+    )
+    step("an unverified farmer cannot sell")
     farmer = run.person("Farmer V1", 1, 1, ["farmer"], lat, lng)
     customer = run.person("Customer V1", 2, 1, ["customer"], lat + 0.01, lng + 0.01)
-    inspector = run.person("Inspector V1", 3, 1, ["inspector"], lat, lng)
+    other = run.person("Other V1", 2, 9, ["customer"], lat + 0.02, lng)
     partner = run.person("Partner V1", 4, 1, ["delivery"], lat, lng)
-    step("farmer verified by the admin, customer, inspector and delivery partner registered")
+    step("farmer verified by the admin, customers and a delivery partner registered")
 
     farm = gw.call(
         "POST",
@@ -215,82 +249,23 @@ def v1(run: Run) -> None:
     expect(after["qtyAvailable"] == 96, f"stock should drop to 96, is {after['qtyAvailable']}")
     step("order placed and paid: CONFIRMED, stock reduced")
 
-    def notified(user: dict, title: str):
-        rows = run.get("/notification/notifications?limit=50", user["token"])["items"]
-        return any(n["title"] == title for n in rows)
-
-    wait_for(lambda: notified(customer, "Order Placed Successfully"), "the customer's notification")
-    wait_for(lambda: notified(farmer, "New order to pack"), "the farmer's notification", timeout=30)
+    wait_for(
+        lambda: run.notified(customer, "Order Placed Successfully"), "the customer's notification"
+    )
+    wait_for(
+        lambda: run.notified(farmer, "New order to pack"), "the farmer's notification", timeout=30
+    )
     step("customer and farmer were both notified")
 
-    gw.call("POST", f"/order/orders/{order['id']}/pack", token=farmer["token"])
+    packed = gw.call("POST", f"/order/orders/{order['id']}/pack", token=farmer["token"]).json()
     expect(
-        run.get(f"/order/orders/{order['id']}", farmer["token"])["status"] == "PACKED",
-        "pack failed",
+        packed["status"] == "READY_FOR_DISPATCH",
+        f"a packed order goes straight to READY_FOR_DISPATCH (no quality gate), got {packed['status']}",
     )
-    step("farmer packed the order: PACKED")
+    step("farmer packed the order: READY_FOR_DISPATCH")
 
-    inspection = run.inspection_for("ORDER", order["id"])
-    run.report(inspection, inspector, lat, lng, 4)
-    wait_for(
-        lambda: (
-            run.get(f"/order/orders/{order['id']}", customer["token"])["status"]
-            == "READY_FOR_DISPATCH"
-        ),
-        "the order to become READY_FOR_DISPATCH",
-    )
-    step("inspection passed: READY_FOR_DISPATCH")
-
-    due = today().isoformat()
-    pool_stops: list[dict] = []
-
-    def pooled() -> bool:
-        pools = gw.call("POST", f"/logistics/pools/run?pool_date={due}", token=run.admin).json()[
-            "pools"
-        ]
-        for pool in pools:
-            if any(s["orderId"] == order["id"] for s in pool["stops"]):
-                expect(
-                    pool.get("partnerId") in (None, partner["id"]),
-                    "the route went to another idle delivery partner; run on a stack without other "
-                    "idle partners (empty CI stack) or after reset-demo.sh",
-                )
-                pool_stops[:] = sorted(pool["stops"], key=lambda s: s["seq"])
-                return True
-        return False
-
-    wait_for(pooled, "the pooling job to include the order", timeout=60, interval=3)
-    expect(
-        run.get(f"/order/orders/{order['id']}", customer["token"])["status"] == "POOLED"
-        or wait_for(
-            lambda: (
-                run.get(f"/order/orders/{order['id']}", customer["token"])["status"] == "POOLED"
-            ),
-            "the order to become POOLED",
-        ),
-        "order is not POOLED",
-    )
-    step("pooled into a route: POOLED")
-
-    mine = [s for s in pool_stops if s["orderId"] == order["id"]]
-    for stop in (s for s in mine if s["stopType"] == "PICKUP"):
-        gw.call("POST", f"/logistics/stops/{stop['id']}/pickup", token=partner["token"], json={})
-    drop = next(s for s in mine if s["stopType"] == "DROP")
-    proof = run.photo(
-        partner["token"], "delivery", "DELIVERY", drop["id"], drop["lat"], drop["lng"]
-    )
-    gw.call(
-        "POST",
-        f"/logistics/stops/{drop['id']}/deliver",
-        token=partner["token"],
-        json={"photoMediaId": proof, "otp": drop.get("otp") or "0000", "notes": "Journey test."},
-    )
-    wait_for(
-        lambda: run.get(f"/order/orders/{order['id']}", customer["token"])["status"] == "COMPLETED",
-        "the order to become COMPLETED",
-        timeout=45,
-    )
-    step("picked up and delivered with photo proof: COMPLETED")
+    run.deliver(order["id"], customer, partner, other)
+    step("pooled, picked up, delivered with a photo and the customer's code: COMPLETED")
 
     gw.call(
         "POST",
@@ -309,7 +284,7 @@ def v1(run: Run) -> None:
     )
     expect(payouts[0]["amount"] > 0, "payout amount should be positive")
     wait_for(
-        lambda: notified(farmer, "Order delivered"),
+        lambda: run.notified(farmer, "Order delivered"),
         "the farmer's delivery notification",
         timeout=30,
     )
@@ -324,7 +299,7 @@ def v1(run: Run) -> None:
     )
     expect(rated["farmRating"] == 5, f"farm rating should be 5, is {rated['farmRating']}")
     wait_for(
-        lambda: notified(farmer, "New rating: 5 of 5"),
+        lambda: run.notified(farmer, "New rating: 5 of 5"),
         "the farmer's rating notification",
         timeout=30,
     )
@@ -338,8 +313,8 @@ def v2(run: Run) -> None:
     farmer = run.person("Farmer V2", 1, 2, ["farmer"], lat, lng)
     customer = run.person("Customer V2", 2, 2, ["customer"], lat + 0.01, lng)
     buyer = run.person("Customer V2b", 2, 3, ["customer"], lat + 0.01, lng)
-    inspector = run.person("Inspector V2", 3, 2, ["inspector"], lat, lng)
-    step("farmer verified, two customers and an inspector registered")
+    partner = run.person("Partner V2", 4, 2, ["delivery"], lat, lng)
+    step("farmer verified, two customers and a delivery partner registered")
 
     seasons: list[tuple[str, dict]] = []
     for n in range(2):
@@ -390,6 +365,9 @@ def v2(run: Run) -> None:
             json={"plotSeasonId": season["id"], "cropId": "rice", "expectedQtyKg": 600},
         ).json()
         expect(made["status"] == "PENDING", f"a new reservation is PENDING, got {made['status']}")
+        wait_for(
+            lambda: run.notified(farmer, "New land request"), "the farmer's land request notice"
+        )
         accepted = gw.call(
             "POST", f"/land/reservations/{made['id']}/accept", token=farmer["token"]
         ).json()
@@ -426,13 +404,28 @@ def v2(run: Run) -> None:
             len(updates) == 1 and updates[0]["mediaIds"] == [media],
             "customer cannot see the crop update",
         )
-    step("crop update with a photo posted by the farmer and read by the customer")
+        wait_for(lambda u=user: run.notified(u, "Your rice: sown"), "the customer's crop notice")
+    step("crop update with a photo posted by the farmer, read by the customer, who was told")
 
     for made in (delivery, buyback):
-        gw.call("POST", f"/land/reservations/{made['id']}/harvest-ready", token=farmer["token"])
-        inspection = run.inspection_for("HARVEST", made["id"])
-        run.report(inspection, inspector, lat, lng, 580)
-    step("harvest marked ready and passed by the inspector")
+        gw.call(
+            "POST",
+            f"/land/reservations/{made['id']}/harvest-ready",
+            token=farmer["token"],
+            json={"harvestedQtyKg": 580},
+        )
+
+    def status_of(made: dict, user: dict) -> str:
+        return next(
+            r for r in run.get("/land/reservations/mine", user["token"]) if r["id"] == made["id"]
+        )["status"]
+
+    for made, user in ((delivery, customer), (buyback, buyer)):
+        wait_for(
+            lambda made=made, user=user: status_of(made, user) == "FULFILLING",
+            "the reservation to wait for the customer's choice (FULFILLING)",
+        )
+    step("harvest marked ready with its weight: the harvest orders exist (no inspection)")
 
     def harvest_order(user: dict, body: dict) -> dict:
         def attempt():
@@ -462,7 +455,19 @@ def v2(run: Run) -> None:
             f"/order/orders/{order['id']}", customer["token"] if order is d else buyer["token"]
         )
         expect(got["orderType"] == "HARVEST", f"expected a HARVEST order, got {got['orderType']}")
-    step("customer chose delivery and the other chose buy-back: both HARVEST orders exist")
+        expect(got["items"][0]["qty"] == 580, "the harvest order is not for the harvested weight")
+    kinds = {p["kind"]: p["amount"] for p in b["payments"]}
+    expect(
+        kinds.get("BALANCE", 0) + kinds.get("DEPOSIT", 0) == b["subtotal"]
+        and kinds.get("REFUND") == round(b["subtotal"] * 0.9, 2),
+        f"buy-back must charge the balance, then credit 90%: {kinds}",
+    )
+    wait_for(lambda: status_of(buyback, buyer) == "COMPLETED", "the bought-back reservation")
+    step("buy-back: balance charged, 90% credited, order and reservation COMPLETED")
+
+    run.deliver(d["id"], customer, partner, buyer)
+    wait_for(lambda: status_of(delivery, customer) == "COMPLETED", "the delivered reservation")
+    step("the harvest went out on a pooled route with a delivery code: reservation COMPLETED")
 
 
 JOURNEYS = {"v1": v1, "v2": v2}

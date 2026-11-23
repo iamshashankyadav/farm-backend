@@ -33,7 +33,7 @@ def main() -> None:
     parser.add_argument(
         "--skip-ops",
         action="store_true",
-        help="do not take orders through packing, inspection, pooling and delivery",
+        help="do not take orders through packing, pooling and delivery",
     )
     args = parser.parse_args()
     if not (args.admin_phone and args.admin_password):
@@ -57,6 +57,7 @@ def main() -> None:
                     [f.phone for f in data.farmers],
                     args.admin_phone,
                     args.admin_password,
+                    [c.phone for c in data.customers],
                 ),
             )
 
