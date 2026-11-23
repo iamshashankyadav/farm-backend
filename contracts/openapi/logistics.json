@@ -380,6 +380,31 @@
             "title": "Pooldate",
             "type": "string"
           },
+          "routePath": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The road line through the stops in visiting order, as [lat, lng] pairs. Only sent by GET /my-route and when accepting an offer, and only when the routing engine found it; otherwise the client joins the stops with straight lines.",
+            "title": "Routepath"
+          },
           "status": {
             "$ref": "#/components/schemas/PoolStatus"
           },

@@ -78,6 +78,14 @@ class PoolOut(ApiModel):
     total_km: float | None
     km_saved: float | None
     stops: list[StopOut] = Field(default_factory=list)
+    route_path: list[tuple[float, float]] | None = Field(
+        default=None,
+        description=(
+            "The road line through the stops in visiting order, as [lat, lng] pairs. Only sent "
+            "by GET /my-route and when accepting an offer, and only when the routing engine "
+            "found it; otherwise the client joins the stops with straight lines."
+        ),
+    )
     created_at: datetime
     assigned_at: datetime | None
 
