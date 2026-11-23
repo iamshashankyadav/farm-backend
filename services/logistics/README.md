@@ -19,7 +19,7 @@ Delivery pooling, routes, partner app API, tracking, and proof of delivery.
 - **Clustering**: Groups orders ready for dispatch using **DBSCAN** (`eps ≈ 3.0 km`, haversine metric) on delivery drop coordinates.
 - **Capacity Splitting**: Divides oversized clusters into sub-clusters when total weight exceeds partner capacity (`partner_capacity_kg = 50.0 kg`).
 - **Pickup-Before-Drop Constraint**: Sequenced so hub pickup stops precede customer drop stops.
-- **OSRM Routing Integration**: Calls the OSRM Trip API to obtain the optimal waypoint ordering, polyline geometry, per-stop ETAs, `total_km`, and `km_saved` versus separate individual trips.
+- **OSRM Routing Integration**: Calls the OSRM Trip API for the drop order and `km_saved`, then the Route API through the stops in their real visiting order (all pickups, then all drops) for the road line, `total_km` and per-drop ETAs. The line is stored on the pool and returned as `routePath` ([lat, lng] pairs) by `GET /my-route`; clients fall back to straight lines when it is absent. Point `OSRM_BASE_URL` at your own router (`infra/osrm/`); the public demo server is rate-limited and has no uptime guarantee.
 - **Event Publishing**: Publishes `pool.assigned` with pool metadata and stops via the transactional outbox (`farm_common.outbox`).
 
 ### 2. Worker & Nightly Cron
