@@ -969,6 +969,63 @@
         ]
       }
     },
+    "/my-routes": {
+      "get": {
+        "description": "Every pool of this partner dated in the window, or taken in it (an offer accepted today\nfor a pool dated earlier still belongs to today's work). Newest first, with stops.",
+        "operationId": "my_routes_my_routes_get",
+        "parameters": [
+          {
+            "description": "How many days back, today included",
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "description": "How many days back, today included",
+              "maximum": 60,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PoolOut"
+                  },
+                  "title": "Response My Routes My Routes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The signed-in delivery partner's routes of the last days, today included",
+        "tags": [
+          "logistics"
+        ]
+      }
+    },
     "/offers/mine": {
       "get": {
         "operationId": "my_offers_offers_mine_get",

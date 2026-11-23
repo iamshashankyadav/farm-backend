@@ -5,6 +5,7 @@ Mounted at /api/v1/logistics by the gateway.
 POST  /logistics/pools/run?date     Admin → trigger pooling job now
 GET   /logistics/pools?pool_date    Admin → saved pools for a date
 GET   /logistics/my-route?date      Delivery partner → today's assigned route
+GET   /logistics/my-routes?days     Delivery partner → every route of the last days (history)
 POST  /logistics/stops/{id}/pickup  Delivery partner → confirm pickup at hub
 POST  /logistics/stops/{id}/deliver Delivery partner → confirm delivery + photo + OTP
 POST  /logistics/stops/{id}/arrive  Delivery partner → mark arrival at stop
@@ -20,12 +21,12 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from geoalchemy2.shape import to_shape
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from farm_common.auth import CurrentUser, Role, get_current_user, require_roles
@@ -43,7 +44,7 @@ from logistics_service.db import (
     StopStatus,
     StopType,
 )
-from logistics_service.pooling import fetch_ready_orders, india_today, run_pooling
+from logistics_service.pooling import IST, fetch_ready_orders, india_today, run_pooling
 from logistics_service.schemas import (
     DeliverIn,
     LocationPingIn,
@@ -268,6 +269,39 @@ async def my_route(
 
     _, stops = await _get_pool_with_stops(session, pool.id)
     return _pool_out(pool, stops, with_path=True)
+
+
+@router.get(
+    "/my-routes",
+    response_model=list[PoolOut],
+    summary="The signed-in delivery partner's routes of the last days, today included",
+)
+async def my_routes(
+    days: int = Query(default=7, ge=1, le=60, description="How many days back, today included"),
+    user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
+    session: AsyncSession = Depends(get_session),
+) -> list[PoolOut]:
+    """Every pool of this partner dated in the window, or taken in it (an offer accepted today
+    for a pool dated earlier still belongs to today's work). Newest first, with stops."""
+    since = india_today() - timedelta(days=days - 1)
+    since_at = datetime.combine(since, time.min, tzinfo=IST)
+    pools = list(
+        (
+            await session.execute(
+                select(DeliveryPool)
+                .where(
+                    DeliveryPool.partner_id == UUID(user.id),
+                    or_(DeliveryPool.pool_date >= since, DeliveryPool.assigned_at >= since_at),
+                )
+                .order_by(DeliveryPool.pool_date.desc(), DeliveryPool.created_at.desc())
+            )
+        ).scalars()
+    )
+    out: list[PoolOut] = []
+    for pool in pools:
+        _, stops = await _get_pool_with_stops(session, pool.id)
+        out.append(_pool_out(pool, stops))
+    return out
 
 
 # ---------------------------------------------------------------------------

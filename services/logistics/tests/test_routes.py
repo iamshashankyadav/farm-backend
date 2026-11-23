@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -266,6 +266,49 @@ async def test_my_route_with_assigned_pool(
     assert len(body["stops"]) == 2
     assert body["stops"][0]["stopType"] == "PICKUP"
     assert body["stops"][1]["stopType"] == "DROP"
+
+
+@pytest.mark.asyncio
+async def test_my_routes_lists_today_and_earlier_days(
+    client: AsyncClient,
+    make_token,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    from logistics_service.pooling import india_today
+
+    partner_id = uuid4()
+    today = india_today()
+    ids = {"today": uuid4(), "yesterday": uuid4(), "old": uuid4(), "other": uuid4()}
+    async with session_factory() as session, session.begin():
+        for key, day, partner in (
+            ("today", today, partner_id),
+            ("yesterday", today - timedelta(days=1), partner_id),
+            ("old", today - timedelta(days=30), partner_id),
+            ("other", today, uuid4()),
+        ):
+            session.add(
+                DeliveryPool(
+                    id=ids[key], pool_date=day, partner_id=partner, status=PoolStatus.COMPLETED
+                )
+            )
+        session.add(
+            PoolStop(
+                id=uuid4(),
+                pool_id=ids["today"],
+                order_id=uuid4(),
+                stop_type=StopType.DROP,
+                seq=1,
+                lat=21.2,
+                lng=81.3,
+                status=StopStatus.DONE,
+            )
+        )
+
+    headers = make_token(partner_id, "delivery")
+    body = (await client.get("/my-routes?days=7", headers=headers)).json()
+    assert [p["id"] for p in body] == [str(ids["today"]), str(ids["yesterday"])]
+    assert body[0]["stops"][0]["status"] == "DONE"
+    assert (await client.get("/my-routes?days=0", headers=headers)).status_code == 422
 
 
 # ---------------------------------------------------------------------------
