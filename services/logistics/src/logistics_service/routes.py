@@ -49,6 +49,7 @@ from logistics_service.schemas import (
     LocationPingIn,
     OfferOut,
     OfferPlace,
+    OfferStop,
     PickupIn,
     PoolOut,
     PoolRunResponse,
@@ -614,6 +615,9 @@ async def my_offers(
                 first_pickup=OfferPlace(lat=first.lat, lng=first.lng, address=first.address)
                 if first
                 else None,
+                stops=[
+                    OfferStop(seq=s.seq, stop_type=s.stop_type, lat=s.lat, lng=s.lng) for s in stops
+                ],
                 offered_at=offer.created_at,
                 expires_at=offer.expires_at,
             )

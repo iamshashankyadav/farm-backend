@@ -200,6 +200,14 @@
             "title": "Stopcount",
             "type": "integer"
           },
+          "stops": {
+            "description": "Every stop in driving order, to draw the route",
+            "items": {
+              "$ref": "#/components/schemas/OfferStop"
+            },
+            "title": "Stops",
+            "type": "array"
+          },
           "totalKm": {
             "anyOf": [
               {
@@ -250,6 +258,34 @@
           "lng"
         ],
         "title": "OfferPlace",
+        "type": "object"
+      },
+      "OfferStop": {
+        "description": "One stop of an offered route, in driving order. No address or customer: the partner has\nnot taken the route yet, so they only see where it goes.",
+        "properties": {
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lng": {
+            "title": "Lng",
+            "type": "number"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "stopType": {
+            "$ref": "#/components/schemas/StopType"
+          }
+        },
+        "required": [
+          "seq",
+          "stopType",
+          "lat",
+          "lng"
+        ],
+        "title": "OfferStop",
         "type": "object"
       },
       "PickupIn": {

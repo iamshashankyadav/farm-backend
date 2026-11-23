@@ -207,6 +207,9 @@ async def test_open_offers_list_and_decline(
     mine = (await client.get("/logistics/offers/mine", headers=make_token(a, "delivery"))).json()
     assert len(mine) == 1 and mine[0]["poolId"] == str(pool.id) and mine[0]["stopCount"] == 2
     assert mine[0]["firstPickup"]["lat"] == 21.0
+    route = mine[0]["stops"]
+    assert [x["seq"] for x in route] == sorted(x["seq"] for x in route) and len(route) == 2
+    assert route[0]["stopType"] == "PICKUP" and "address" not in route[0]
     assert (
         await client.post(f"/logistics/offers/{pool.id}/decline", headers=make_token(a, "delivery"))
     ).status_code == 204
