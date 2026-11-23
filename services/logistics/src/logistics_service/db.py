@@ -26,6 +26,7 @@ from sqlalchemy import (
     MetaData,
     SmallInteger,
     String,
+    UniqueConstraint,
     Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -193,6 +194,33 @@ class LocationPing(Base):
     speed_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     heading: Mapped[float | None] = mapped_column(Float, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class OfferStatus(StrEnum):
+    OFFERED = "OFFERED"  # waiting for this partner to answer
+    ACCEPTED = "ACCEPTED"  # this partner took the pool
+    TAKEN = "TAKEN"  # another partner took it first
+    DECLINED = "DECLINED"  # this partner said no
+
+
+class PoolOffer(Base):
+    """A pool offered to one nearby delivery partner; the first to accept is assigned the pool.
+
+    The pool row is the source of truth (`delivery_pools.partner_id` is set by a single
+    conditional UPDATE), so two partners accepting at once can never both win.
+    """
+
+    __tablename__ = "pool_offers"
+    __table_args__ = (UniqueConstraint("pool_id", "partner_id", name="pool_offer_once"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    pool_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    partner_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    status: Mapped[str] = mapped_column(String(10), default=OfferStatus.OFFERED)
+    distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # ---------------------------------------------------------------------------

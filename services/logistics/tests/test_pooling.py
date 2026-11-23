@@ -188,7 +188,7 @@ async def test_pools_are_assigned_to_the_least_loaded_partner(
                 DeliveryPartner(name="Rider Bharat", home_lat=21.5, home_lng=81.7),
             ]
         )
-    settings = LogisticsSettings(events_enabled=False, dbscan_eps_km=3.0)
+    settings = LogisticsSettings(events_enabled=False, dbscan_eps_km=3.0, dispatch_mode="assign")
     orders = [_order(21.1, 81.3), _order(21.5, 81.7)]
     with patch("logistics_service.pooling.get_route", new=AsyncMock(return_value=_MOCK_ROUTE)):
         pools = await run_pooling(POOL_DATE, orders, session_factory, settings)

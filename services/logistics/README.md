@@ -43,3 +43,24 @@ cd services/logistics && uv run alembic upgrade head
 # Run tests
 uv run pytest services/logistics
 ```
+
+## Dispatch: route offers (first to accept gets it)
+
+When a farmer packs an order, the order service publishes `order.ready_for_dispatch`. Logistics
+waits `POOL_ON_READY_DELAY_S` (5 s, so orders packed together share a pool) and runs the pooling
+job for that order's delivery date. With `DISPATCH_MODE=offer` (the default) each new pool is not
+assigned; it is **offered**:
+
+1. Partners with a location ping in the last `OFFER_ONLINE_MINUTES` (30) and within
+   `OFFER_RADIUS_KM` (15) of the first pickup get an offer, nearest first. Nobody that close: every
+   online partner; nobody online: every known partner. `pool.offered` goes out, and the
+   notification service pushes `POOL_OFFER` to each of them.
+2. `POST /logistics/offers/{poolId}/accept` assigns the pool with one conditional UPDATE
+   (`WHERE partner_id IS NULL`), so of two partners accepting at once exactly one wins; the other
+   gets `409 POOL_TAKEN`. The winner's response is the route.
+3. `pool.assigned` then goes out as before (orders become POOLED, the customer is told), and
+   `pool.offer_closed` makes the notification service replace the other partners' offer
+   notification with "Route taken" (same FCM `tag`).
+4. `GET /logistics/offers/mine` lists a partner's open offers; `POST .../decline` turns one down.
+
+`DISPATCH_MODE=assign` keeps the old behaviour (straight to the least-loaded partner).

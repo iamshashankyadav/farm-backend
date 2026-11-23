@@ -11,6 +11,9 @@ POST  /logistics/stops/{id}/arrive  Delivery partner → mark arrival at stop
 POST  /logistics/stops/{id}/skip    Delivery partner → mark stop skipped
 POST  /logistics/location           Delivery partner → location ping (every 30 s)
 GET   /logistics/orders/{id}/track  Customer → live tracking
+GET   /logistics/offers/mine        Delivery partner → open route offers
+POST  /logistics/offers/{pool}/accept   Delivery partner → take the route (first wins)
+POST  /logistics/offers/{pool}/decline  Delivery partner → turn the offer down
 """
 
 from __future__ import annotations
@@ -43,6 +46,8 @@ from logistics_service.pooling import fetch_ready_orders, india_today, run_pooli
 from logistics_service.schemas import (
     DeliverIn,
     LocationPingIn,
+    OfferOut,
+    OfferPlace,
     PickupIn,
     PoolOut,
     PoolRunResponse,
@@ -566,3 +571,77 @@ async def track_order(
         partner_updated_at=partner_updated_at,
         eta=eta,
     )
+
+
+# ---------------------------------------------------------------------------
+# Route offers (dispatch.py): a new pool is offered to nearby partners, first to accept gets it
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/offers/mine",
+    response_model=list[OfferOut],
+    summary="Open route offers for the signed-in delivery partner",
+)
+async def my_offers(
+    user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
+    session: AsyncSession = Depends(get_session),
+) -> list[OfferOut]:
+    from logistics_service.dispatch import open_offers
+
+    out: list[OfferOut] = []
+    for offer, pool, stops in await open_offers(session, UUID(user.id)):
+        pickups = [s for s in stops if s.stop_type == StopType.PICKUP]
+        first = pickups[0] if pickups else None
+        out.append(
+            OfferOut(
+                pool_id=pool.id,
+                pool_date=pool.pool_date,
+                stop_count=len(stops),
+                pickup_count=len(pickups),
+                drop_count=len(stops) - len(pickups),
+                total_km=pool.total_km,
+                distance_km=offer.distance_km,
+                first_pickup=OfferPlace(lat=first.lat, lng=first.lng, address=first.address)
+                if first
+                else None,
+                offered_at=offer.created_at,
+                expires_at=offer.expires_at,
+            )
+        )
+    return out
+
+
+@router.post(
+    "/offers/{pool_id}/accept",
+    response_model=PoolOut,
+    summary="Take an offered route; the first partner to accept gets it",
+    responses={409: {"description": "POOL_TAKEN: another partner accepted first"}},
+)
+async def accept_route_offer(
+    pool_id: UUID,
+    user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
+    session: AsyncSession = Depends(get_session),
+) -> PoolOut:
+    from logistics_service.dispatch import accept_offer
+
+    async with session.begin():
+        pool = await accept_offer(session, pool_id, UUID(user.id))
+    _, stops = await _get_pool_with_stops(session, pool.id)
+    return _pool_out(pool, stops)
+
+
+@router.post(
+    "/offers/{pool_id}/decline",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Turn an offered route down",
+)
+async def decline_route_offer(
+    pool_id: UUID,
+    user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    from logistics_service.dispatch import decline_offer
+
+    async with session.begin():
+        await decline_offer(session, pool_id, UUID(user.id))
