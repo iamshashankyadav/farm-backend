@@ -47,7 +47,7 @@ def user_payload(user: User) -> dict:
 
 async def start_session(session: AsyncSession, user: User, settings: IdentitySettings) -> TokenOut:
     """Issue an access + refresh token pair and remember the refresh token. Commits."""
-    tokens = issue_tokens(user.id, user.roles, settings)
+    tokens = issue_tokens(user.id, user.roles, settings, user.farmer_verified)
     session.add(
         RefreshToken(id=tokens.refresh_jti, user_id=user.id, expires_at=tokens.refresh_expires_at)
     )

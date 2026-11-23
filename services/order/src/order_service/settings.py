@@ -15,12 +15,9 @@ class OrderSettings(ServiceSettings):
     # Mock payments always succeed, except when the payment intent amount equals this value.
     # Use it in demos and tests to show the payment-failed path.
     mock_payment_fail_amount: Decimal | None = None
-    # Harvest orders (V2, #24). TODO(M1): all four numbers are assumptions, see docs/m1-assumptions.md.
+    # Harvest orders (V2, #24). TODO(M1): both numbers are assumptions, see docs/m1-assumptions.md.
     # The deposit is this share of the crop price; used only when land does not send the price.
     harvest_deposit_share: Decimal = Decimal("0.20")
-    # A harvest accepted at a lower grade sells for this share of the agreed price.
-    grade_b_price_factor: Decimal = Decimal("0.90")
-    grade_c_price_factor: Decimal = Decimal("0.80")
     # BUYBACK credits the customer this share of the harvest value.
     buyback_rate: Decimal = Decimal("0.90")
     # A DEPOSIT intent is paid the moment it is created. Turn off to settle it with the webhook.

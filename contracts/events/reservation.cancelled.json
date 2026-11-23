@@ -2,11 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "reservation.cancelled",
   "title": "reservation.cancelled",
-  "description": "Producer: land. A customer, farmer or admin cancelled a live plot reservation. The order service refunds any paid deposit.",
+  "description": "Producer: land. A customer, farmer or admin cancelled a live plot reservation. The order service refunds any paid deposit; the notification service tells the other side.",
   "type": "object",
-  "required": ["reservationId"],
+  "required": [
+    "reservationId",
+    "cancelledBy"
+  ],
   "properties": {
-    "reservationId": { "type": "string", "format": "uuid" }
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    },
+    "cancelledBy": {
+      "enum": [
+        "customer",
+        "farmer",
+        "admin"
+      ]
+    }
   },
   "additionalProperties": false
 }

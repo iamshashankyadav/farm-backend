@@ -58,7 +58,6 @@ PHOTOS: dict[str, str] = {
     "farm_3": "vegetable farm india field rows",
     # operations
     "delivery": "box of vegetables delivery",
-    "inspection": "vegetable market inspection crates",
 }
 
 # Reviewed picks: key -> exact Commons file. A key without a pin falls back to the first good search hit.
@@ -80,7 +79,6 @@ PINNED: dict[str, str] = {
     "farm_2": "Village Fields (16596769371).jpg",
     "farm_3": "Carrot Cabbage Fields Hullathy Nilgiris Dec24 A7CR 05419.jpg",
     "delivery": "Tomatos ready for dispatch.jpg",
-    "inspection": "Tomatoes Fresh from Crates, Northern Ghana.jpg",
 }
 
 OK_LICENCES = re.compile(r"^(CC0|Public domain|PD|CC BY(-SA)? [0-9.]+|CC BY(-SA)?)$", re.I)

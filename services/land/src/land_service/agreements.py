@@ -55,13 +55,14 @@ def build_terms(
         "The plot-season becomes ACTIVE once the deposit is paid and is not offered to anyone else.",
         "The farmer grows the crop and posts progress updates with geotagged photos at each stage.",
         (
-            "At harvest a quality inspector grades the crop. On a pass the customer chooses home delivery "
-            "or buy-back (the farmer sells the produce and credits the customer)."
+            "At harvest the farmer records the weight harvested; the price is the agreed rate per kg "
+            "for that weight. The customer then chooses home delivery or buy-back (the farmer sells the "
+            "produce and credits the customer 90% of its value)."
         ),
         (
-            "On a failed inspection the customer may accept the lower grade at its price, or the farmer "
-            "re-harvests; if neither is possible the deposit is refunded."
+            "After delivery the customer rates the harvest; the rating is shown to future customers "
+            "of this farmer."
         ),
-        "Either side can cancel before the deposit is paid without charge.",
+        "Either side can cancel before the harvest; a deposit already paid is refunded in full.",
     ]
     return AgreementTerms(total=total, deposit=deposit, balance=balance, terms=terms)

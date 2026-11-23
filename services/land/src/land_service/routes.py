@@ -4,11 +4,11 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, Response
 from geoalchemy2 import Geography, Geometry
-from sqlalchemy import cast, func, select
+from sqlalchemy import and_, cast, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from farm_common.auth import CurrentUser, Role, require_roles
+from farm_common.auth import CurrentUser, Role, require_roles, require_verified_farmer
 from farm_common.errors import AppError
 from farm_common.events import Event
 from farm_common.outbox import add_event
@@ -19,6 +19,7 @@ from land_service.geo import geometry_json, point_to_db, polygon_to_db
 from land_service.schemas import (
     AgreementOut,
     CropUpdateCreate,
+    HarvestReadyIn,
     PlotCreate,
     PlotOut,
     PlotUpdate,
@@ -33,7 +34,38 @@ router = APIRouter()
 farmer = require_roles(Role.FARMER)
 farmer_admin = require_roles(Role.FARMER, Role.ADMIN)
 customer = require_roles(Role.CUSTOMER)
+# offering land needs an admin-verified farmer (403 FARMER_NOT_VERIFIED otherwise)
+seller = require_verified_farmer()
 LIVE = ("PENDING", "ACCEPTED", "ACTIVE", "HARVEST_READY")
+# A season is taken while a reservation is live, and stays taken once its crop was grown.
+TAKEN = (*LIVE, "FULFILLING", "COMPLETED")
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def today_ist() -> date:
+    return datetime.now(IST).date()
+
+
+def holds_season():
+    """SQL: this reservation keeps its plot-season from others. A PENDING request stops holding it
+    once its 48 hours are over, even before the expiry worker marks it EXPIRED."""
+    return and_(
+        Reservation.status.in_(TAKEN),
+        or_(Reservation.status != "PENDING", Reservation.expires_at > func.now()),
+    )
+
+
+def publish(session, event_type: str, payload: dict) -> None:
+    add_event(session, OutboxEvent, Event(type=event_type, producer="land", payload=payload))
+
+
+def parties(row) -> dict:
+    return {
+        "reservationId": str(row.id),
+        "customerId": str(row.customer_id),
+        "farmerId": str(row.farmer_id),
+        "cropId": row.crop_id,
+    }
 
 
 def plot_out(row, boundary, centroid):
@@ -94,7 +126,7 @@ async def load_plot(session, plot_id):
 @router.post("/plots", status_code=201, response_model=PlotOut, tags=["plots"])
 async def create_plot(
     body: PlotCreate,
-    user: CurrentUser = Depends(farmer),
+    user: CurrentUser = Depends(seller),
     session: AsyncSession = Depends(get_session),
 ):
     boundary = polygon_to_db(body.boundary)
@@ -192,9 +224,10 @@ async def search_plots(
         .where(Plot.status == "ACTIVE")
     )
     query = query.where(
+        PlotSeason.end_date >= today_ist(),
         ~select(Reservation.id)
-        .where(Reservation.plot_season_id == PlotSeason.id, Reservation.status.in_(LIVE))
-        .exists()
+        .where(Reservation.plot_season_id == PlotSeason.id, holds_season())
+        .exists(),
     )
     if season:
         query = query.where(PlotSeason.season == season)
@@ -333,6 +366,37 @@ async def delete_plot(
     return Response(status_code=204)
 
 
+async def refuse_overlap(session, plot_id, body, season_id=None) -> None:
+    """One piece of land can be let to one customer at a time: seasons of a plot must not share a
+    day. The plot row is locked, so two requests for the same plot are checked one after the other
+    (and the database's exclusion constraint backs this up)."""
+    await session.execute(select(Plot.id).where(Plot.id == plot_id).with_for_update())
+    same_days = [
+        PlotSeason.plot_id == plot_id,
+        PlotSeason.start_date <= body.end_date,
+        PlotSeason.end_date >= body.start_date,
+    ]
+    if season_id is not None:
+        same_days.append(PlotSeason.id != season_id)
+    clash = await session.scalar(select(PlotSeason).where(*same_days).limit(1))
+    if clash is not None:
+        raise AppError(
+            "SEASON_OVERLAP",
+            f"This plot already has the {clash.season} season from "
+            f"{clash.start_date:%d %b %Y} to {clash.end_date:%d %b %Y}; seasons must not overlap",
+            409,
+            details={"seasonId": str(clash.id)},
+        )
+
+
+async def commit_season(session) -> None:
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise AppError("SEASON_OVERLAP", "Seasons of one plot must not overlap", 409) from exc
+
+
 @router.post(
     "/plots/{plot_id}/seasons", status_code=201, response_model=SeasonOut, tags=["seasons"]
 )
@@ -347,9 +411,10 @@ async def create_season(
         raise AppError("PLOT_NOT_FOUND", "Plot not found", 404)
     if str(plot.farmer_id) != user.id:
         raise AppError("NOT_PLOT_OWNER", "This plot belongs to another farmer", 403)
+    await refuse_overlap(session, plot_id, body)
     row = PlotSeason(plot_id=plot_id, **body.model_dump())
     session.add(row)
-    await session.commit()
+    await commit_season(session)
     await session.refresh(row)
     return season_out(row)
 
@@ -395,9 +460,10 @@ async def update_season(
         raise AppError(
             "SEASON_HAS_LIVE_RESERVATION", "A season with a live reservation cannot be changed", 409
         )
+    await refuse_overlap(session, plot_id, body, season_id)
     for key, value in body.model_dump().items():
         setattr(season, key, value)
-    await session.commit()
+    await commit_season(session)
     await session.refresh(season)
     return season_out(season)
 
@@ -429,12 +495,9 @@ async def delete_season(
     return Response(status_code=204)
 
 
-IST = ZoneInfo("Asia/Kolkata")
-
-
 def season_has_ended(end_date: date, today: date | None = None) -> bool:
     """A season can still be reserved on its last day; the day after it is over (India time)."""
-    return end_date < (today or datetime.now(IST).date())
+    return end_date < (today or today_ist())
 
 
 @router.post("/reservations", status_code=201, response_model=ReservationOut, tags=["reservations"])
@@ -453,6 +516,36 @@ async def reserve_plot(
         raise AppError("SEASON_ENDED", "This season has already ended", 422)
     if season.allowed_crops and body.crop_id not in season.allowed_crops:
         raise AppError("CROP_NOT_ALLOWED", "Crop is not allowed in this season", 422)
+    if str(plot.farmer_id) == user.id:
+        raise AppError("OWN_PLOT", "You cannot reserve your own plot", 422)
+    # A request the farmer left unanswered for 48 hours no longer holds the season.
+    stale = (
+        (
+            await session.execute(
+                update(Reservation)
+                .where(
+                    Reservation.plot_season_id == season.id,
+                    Reservation.status == "PENDING",
+                    Reservation.expires_at <= func.now(),
+                )
+                .values(status="EXPIRED", updated_at=func.now())
+                .returning(Reservation)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for old in stale:
+        publish(session, "reservation.expired", parties(old))
+    if await session.scalar(
+        select(Reservation.id)
+        .where(Reservation.plot_season_id == season.id, holds_season())
+        .limit(1)
+    ):
+        await session.commit()  # keep the expiries
+        raise AppError(
+            "PLOT_SEASON_ALREADY_RESERVED", "This plot-season already has a live reservation", 409
+        )
     row = Reservation(
         plot_season_id=season.id,
         customer_id=UUID(user.id),
@@ -464,6 +557,18 @@ async def reserve_plot(
         expires_at=datetime.now(UTC) + timedelta(hours=48),
     )
     session.add(row)
+    await session.flush()
+    publish(
+        session,
+        "reservation.requested",
+        {
+            **parties(row),
+            "plotTitle": plot.title,
+            "season": season.season,
+            "expectedQtyKg": float(row.expected_qty_kg),
+            "expiresAt": row.expires_at.isoformat(),
+        },
+    )
     try:
         await session.commit()
     except IntegrityError as exc:
@@ -560,10 +665,11 @@ async def accept_reservation(
             type="reservation.accepted",
             producer="land",
             payload={
-                "reservationId": str(row.id),
-                "customerId": str(row.customer_id),
-                "farmerId": str(row.farmer_id),
+                **parties(row),
                 "deposit": float(row.deposit),
+                "total": float(row.total),
+                "expectedQtyKg": float(row.expected_qty_kg),
+                "pricePerKg": float(season.price),
                 "agreementId": str(agreement.id),
             },
         ),
@@ -603,6 +709,7 @@ async def reject_reservation(
     if row.status != "PENDING":
         raise AppError("RESERVATION_NOT_PENDING", "Only pending reservations can be rejected", 409)
     row.status = "REJECTED"
+    publish(session, "reservation.rejected", parties(row))
     await session.commit()
     await session.refresh(row)
     return reservation_out(row)
@@ -619,16 +726,15 @@ async def cancel_reservation(
     row = await owned_reservation(session, reservation_id, user, [Role.CUSTOMER, Role.FARMER])
     if row.status not in LIVE:
         raise AppError("RESERVATION_NOT_CANCELLABLE", "Reservation is no longer active", 409)
-    row.status = "CANCELLED"
-    add_event(
-        session,
-        OutboxEvent,
-        Event(
-            type="reservation.cancelled",
-            producer="land",
-            payload={"reservationId": str(row.id)},
-        ),
+    by = (
+        "customer"
+        if str(row.customer_id) == user.id
+        else "farmer"
+        if str(row.farmer_id) == user.id
+        else "admin"
     )
+    row.status = "CANCELLED"
+    publish(session, "reservation.cancelled", {**parties(row), "cancelledBy": by})
     await session.commit()
     await session.refresh(row)
     return reservation_out(row)
@@ -644,23 +750,35 @@ async def add_crop_update(
     row = await owned_reservation(session, reservation_id, user, [Role.FARMER])
     if row.status not in ("ACTIVE", "HARVEST_READY"):
         raise AppError("RESERVATION_NOT_ACTIVE", "Crop updates require an active reservation", 409)
-    update = CropUpdate(
+    entry = CropUpdate(
         reservation_id=row.id,
         stage=body.stage,
         note=body.note,
         media_ids=body.media_ids,
         location=point_to_db(body.location) if body.location else None,
     )
-    session.add(update)
+    session.add(entry)
+    await session.flush()
+    publish(
+        session,
+        "crop.updated",
+        {
+            **parties(row),
+            "updateId": str(entry.id),
+            "stage": entry.stage,
+            "note": entry.note,
+            "photoCount": len(entry.media_ids or []),
+        },
+    )
     await session.commit()
-    await session.refresh(update)
+    await session.refresh(entry)
     return {
-        "id": str(update.id),
+        "id": str(entry.id),
         "reservationId": str(row.id),
-        "stage": update.stage,
-        "note": update.note,
-        "mediaIds": [str(x) for x in update.media_ids],
-        "createdAt": update.created_at,
+        "stage": entry.stage,
+        "note": entry.note,
+        "mediaIds": [str(x) for x in entry.media_ids],
+        "createdAt": entry.created_at,
     }
 
 
@@ -701,9 +819,13 @@ async def list_crop_updates(
 )
 async def harvest_ready(
     reservation_id: UUID,
+    body: HarvestReadyIn | None = None,
     user: CurrentUser = Depends(farmer),
     session: AsyncSession = Depends(get_session),
 ):
+    """The farmer harvested. The order service turns it into a harvest order at once (there is no
+    quality gate); the reservation moves to FULFILLING when that order exists and the customer
+    picks delivery or buy-back."""
     row = await owned_reservation(session, reservation_id, user, [Role.FARMER])
     if row.status != "ACTIVE":
         raise AppError(
@@ -725,6 +847,8 @@ async def harvest_ready(
                 "customerId": str(row.customer_id),
                 "cropId": row.crop_id,
                 "expectedQtyKg": float(row.expected_qty_kg),
+                "harvestedQtyKg": body.harvested_qty_kg if body else None,
+                "total": float(row.total) if row.total is not None else None,
                 "attempt": row.harvest_attempt,
                 "plotCentroid": geometry_json(plot.centroid) if plot else None,
             },

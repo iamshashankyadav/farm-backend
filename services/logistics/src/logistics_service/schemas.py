@@ -60,7 +60,14 @@ class StopOut(ApiModel):
     customer_name: str | None = None
     customer_phone: str | None = None
     notes: str | None = None
-    otp: str | None = None
+    otp: str | None = Field(
+        default=None,
+        description=(
+            "The 4-digit delivery code of a DROP stop. Only the order's customer sees it (in "
+            "GET /orders/{id}/track) and tells it to the partner at the door; it is never sent "
+            "to the partner or in pool lists."
+        ),
+    )
 
 
 class PoolOut(ApiModel):

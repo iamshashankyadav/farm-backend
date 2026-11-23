@@ -196,3 +196,45 @@ async def test_pools_are_assigned_to_the_least_loaded_partner(
     assert len(pools) == 2
     assert all(p.status == PoolStatus.ASSIGNED and p.assigned_at is not None for p in pools)
     assert len({p.partner_id for p in pools}) == 2  # one pool each
+
+
+@pytest.mark.asyncio
+async def test_drop_stops_get_a_delivery_code_and_the_customer(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    customer = uuid4()
+    order = {**_order(21.05, 81.05), "customer_id": str(customer), "contact_phone": "+919800000001"}
+    with patch("logistics_service.pooling.get_route", AsyncMock(return_value=_MOCK_ROUTE)):
+        await run_pooling(POOL_DATE, [order], session_factory, LogisticsSettings())
+
+    async with session_factory() as session:
+        stops = {s.stop_type: s for s in (await session.execute(select(PoolStop))).scalars()}
+    drop, pickup = stops["DROP"], stops["PICKUP"]
+    assert drop.otp is not None and len(drop.otp) == 4 and drop.otp.isdigit()
+    assert pickup.otp is None
+    assert drop.customer_id == customer == pickup.customer_id
+    assert drop.customer_phone == "+919800000001"
+    assert pickup.customer_phone is None
+
+
+@pytest.mark.asyncio
+async def test_running_twice_does_not_pool_an_order_again(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    orders = [_order(21.05, 81.05), _order(21.051, 81.051)]
+    with patch("logistics_service.pooling.get_route", AsyncMock(return_value=_MOCK_ROUTE)):
+        first = await run_pooling(POOL_DATE, orders, session_factory, LogisticsSettings())
+        # pool.assigned has not reached the order service yet, so the feed lists them again
+        second = await run_pooling(POOL_DATE, orders, session_factory, LogisticsSettings())
+
+    assert len(first) == 1
+    assert second == []
+    async with session_factory() as session:
+        drops = (
+            await session.execute(select(PoolStop).where(PoolStop.stop_type == "DROP"))
+        ).scalars()
+        assert len(list(drops)) == 2
+
+
+def test_a_vehicle_carries_about_500_kg_by_default() -> None:
+    assert LogisticsSettings().partner_capacity_kg == 500.0

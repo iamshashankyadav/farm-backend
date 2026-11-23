@@ -37,6 +37,18 @@ def map_event_to_notification(
             return None
         oid = str(p.get("orderId", ""))
         short_id = oid[:8] if oid else ""
+        if p.get("orderType") == "HARVEST":
+            item = (p.get("items") or [{}])[0]
+            crop = str(item.get("name") or "Your crop").removeprefix("Harvest: ")
+            qty = item.get("qty")
+            weight = f" ({qty:g} kg)" if isinstance(qty, (int, float)) else ""
+            return (
+                UUID(str(cid)),
+                NotificationType.HARVEST_READY,
+                "Your harvest is ready",
+                f"{crop} has been harvested{weight}. Choose home delivery or buy-back.",
+                {"orderId": oid, "reservationId": p.get("reservationId"), "total": p.get("total")},
+            )
         return (
             UUID(str(cid)),
             NotificationType.ORDER_PLACED,
@@ -69,21 +81,21 @@ def map_event_to_notification(
             UUID(str(cid)),
             NotificationType.ORDER_PACKED,
             "Order Packed",
-            f"Your order #{short_id} has been packed.",
+            f"Your order #{short_id} is packed and waiting for a delivery partner.",
             {"orderId": oid},
         )
 
     if etype == "order.ready_for_dispatch":
         cid = p.get("customerId")
-        if not cid:
-            return None
+        if not cid or p.get("orderType") != "HARVEST":
+            return None  # a produce order was just packed: "Order Packed" already said so
         oid = str(p.get("orderId", ""))
         short_id = oid[:8] if oid else ""
         return (
             UUID(str(cid)),
             NotificationType.ORDER_READY_FOR_DISPATCH,
-            "Order Ready for Dispatch",
-            f"Your order #{short_id} is ready for dispatch.",
+            "Harvest ready for delivery",
+            f"Your harvest order #{short_id} waits for a delivery partner.",
             {"orderId": oid},
         )
 
@@ -187,45 +199,10 @@ def map_event_to_notification(
             {"reservationId": p.get("reservationId"), "deposit": deposit},
         )
 
-    if etype == "harvest.ready":
-        cid = p.get("customerId")
-        if not cid:
-            return None
-        crop = p.get("cropId", "crop")
-        return (
-            UUID(str(cid)),
-            NotificationType.HARVEST_READY,
-            "Crop Ready for Harvest",
-            f"Your {crop} crop is ready for harvest inspection.",
-            {"reservationId": p.get("reservationId"), "cropId": crop},
-        )
-
-    # 4. Quality graded
-    if etype == "quality.graded":
-        cid = p.get("customerId")
-        if not cid:
-            return None
-        stype = p.get("subjectType")
-        grade = p.get("grade", "")
-        result = p.get("result", "")
-        if stype == "ORDER":
-            title = "Quality Inspection Passed" if result == "PASS" else "Quality Inspection Update"
-            return (
-                UUID(str(cid)),
-                NotificationType.ORDER_QC_PASSED,
-                title,
-                f"Your order passed inspection with Grade {grade}."
-                if result == "PASS"
-                else f"Inspection result: Grade {grade}.",
-                {"inspectionId": p.get("inspectionId"), "grade": grade, "result": result},
-            )
-        return (
-            UUID(str(cid)),
-            NotificationType.HARVEST_READY,
-            "Harvest Inspection Graded",
-            f"Harvest inspection completed with Grade {grade} ({result}).",
-            {"inspectionId": p.get("inspectionId"), "grade": grade, "result": result},
-        )
+    # 4. Land: the customer's side of a reservation
+    land = _land_customer_notification(etype, p)
+    if land is not None:
+        return land
 
     # 5. Pooling assigned
     if etype == "pool.assigned":
@@ -258,6 +235,9 @@ def map_event_to_farmer_notification(
     etype = getattr(event, "type", "") if not isinstance(event, dict) else event.get("type", "")
     if etype == "listing.stock_low":
         return _stock_low_notification(p)
+    land = _land_farmer_notification(etype, p)
+    if land is not None:
+        return land
     owner = p.get("farmOwnerId")
     if not owner:
         return None
@@ -265,7 +245,10 @@ def map_event_to_farmer_notification(
     short_id = oid[:8]
     total = p.get("total")
     total_str = f" (₹{total:.2f})" if isinstance(total, (int, float)) else ""
+    harvest = p.get("orderType") == "HARVEST"
     if etype == "order.placed":
+        if harvest:
+            return None  # the farmer marked the harvest ready; nothing to pack
         return (
             UUID(str(owner)),
             NotificationType.ORDER_PLACED,
@@ -278,7 +261,11 @@ def map_event_to_farmer_notification(
             UUID(str(owner)),
             NotificationType.ORDER_CANCELLED,
             "Order cancelled",
-            f"Order #{short_id} was cancelled. There is nothing to pack.",
+            (
+                f"The customer cancelled harvest order #{short_id}; the deposit is refunded."
+                if harvest
+                else f"Order #{short_id} was cancelled. There is nothing to pack."
+            ),
             {"orderId": oid},
         )
     if etype == "order.rated":
@@ -292,6 +279,15 @@ def map_event_to_farmer_notification(
             f"A customer rated order #{short_id} {score} of 5{said}",
             {"orderId": oid, "score": score},
         )
+    if etype == "order.completed" and p.get("harvestOption") == "BUYBACK":
+        return (
+            UUID(str(owner)),
+            NotificationType.ORDER_COMPLETED,
+            "Harvest bought back",
+            f"The customer chose buy-back for order #{short_id}: the produce is yours to sell, "
+            "and they were credited 90% of its value.",
+            {"orderId": oid, "total": total},
+        )
     if etype == "order.completed":
         return (
             UUID(str(owner)),
@@ -299,6 +295,121 @@ def map_event_to_farmer_notification(
             "Order delivered",
             f"Order #{short_id} reached the customer. Your payout{total_str} is on its way.",
             {"orderId": oid, "total": total},
+        )
+    return None
+
+
+Mapped = tuple[UUID, NotificationType, str, str, dict[str, Any]]
+
+
+def _crop(p: dict[str, Any]) -> str:
+    return str(p.get("cropId") or "crop").replace("_", " ").replace("-", " ")
+
+
+def _land_customer_notification(etype: str, p: dict[str, Any]) -> Mapped | None:
+    """What the customer hears about their land reservation and crop."""
+    cid = p.get("customerId")
+    if not cid or not etype.startswith(("reservation.", "crop.")):
+        return None
+    data = {"reservationId": p.get("reservationId")}
+    crop = _crop(p)
+    if etype == "reservation.rejected":
+        return (
+            UUID(str(cid)),
+            NotificationType.RESERVATION_REJECTED,
+            "Land request declined",
+            f"The farmer declined your request to grow {crop}. Other plots are on the map.",
+            data,
+        )
+    if etype == "reservation.expired":
+        return (
+            UUID(str(cid)),
+            NotificationType.RESERVATION_EXPIRED,
+            "Land request expired",
+            f"The farmer did not answer your request to grow {crop} within 48 hours. "
+            "Nothing was charged; you can request another plot.",
+            data,
+        )
+    if etype == "reservation.cancelled" and p.get("cancelledBy") in ("farmer", "admin"):
+        return (
+            UUID(str(cid)),
+            NotificationType.RESERVATION_CANCELLED,
+            "Reservation cancelled",
+            f"Your reservation to grow {crop} was cancelled by the "
+            f"{p.get('cancelledBy')}. A deposit you paid is refunded in full.",
+            data,
+        )
+    if etype == "crop.updated":
+        stage = str(p.get("stage") or "").lower() or "an update"
+        note = p.get("note")
+        photos = p.get("photoCount") or 0
+        extra = f" {note}" if note else ""
+        pics = f" ({photos} photo{'s' if photos != 1 else ''})" if photos else ""
+        return (
+            UUID(str(cid)),
+            NotificationType.CROP_UPDATE,
+            f"Your {crop}: {stage}",
+            f"The farmer posted a crop update{pics}.{extra}",
+            {**data, "updateId": p.get("updateId"), "stage": p.get("stage")},
+        )
+    return None
+
+
+def _land_farmer_notification(etype: str, p: dict[str, Any]) -> Mapped | None:
+    """What the farmer hears: new land requests, cancellations, deposits, and being verified."""
+    if etype == "farmer.verified":
+        uid = p.get("userId")
+        if not uid:
+            return None
+        return (
+            UUID(str(uid)),
+            NotificationType.FARMER_VERIFIED,
+            "You are verified",
+            "An admin verified your farmer account. You can now list produce and offer land.",
+            {},
+        )
+    fid = p.get("farmerId")
+    if not fid or not etype.startswith("reservation."):
+        return None
+    data = {"reservationId": p.get("reservationId")}
+    crop = _crop(p)
+    if etype == "reservation.requested":
+        qty = p.get("expectedQtyKg")
+        amount = f" (about {qty:g} kg)" if isinstance(qty, (int, float)) else ""
+        where = p.get("plotTitle") or "your plot"
+        season = f", {p['season']} season" if p.get("season") else ""
+        return (
+            UUID(str(fid)),
+            NotificationType.RESERVATION_REQUESTED,
+            "New land request",
+            f"A customer wants to grow {crop}{amount} on {where}{season}. "
+            "Accept or decline within 48 hours.",
+            data,
+        )
+    if etype == "reservation.cancelled" and p.get("cancelledBy") == "customer":
+        return (
+            UUID(str(fid)),
+            NotificationType.RESERVATION_CANCELLED,
+            "Reservation cancelled",
+            f"The customer cancelled their reservation to grow {crop}. The season is open again.",
+            data,
+        )
+    if etype == "reservation.expired":
+        return (
+            UUID(str(fid)),
+            NotificationType.RESERVATION_EXPIRED,
+            "Land request expired",
+            f"A request to grow {crop} expired after 48 hours without an answer.",
+            data,
+        )
+    if etype == "reservation.activated":
+        return (
+            UUID(str(fid)),
+            NotificationType.RESERVATION_ACTIVATED,
+            "Deposit paid: start growing",
+            f"The customer paid the deposit. The {crop} crop is yours to grow; post updates "
+            "with photos as it grows.",
+            data,
         )
     return None
 

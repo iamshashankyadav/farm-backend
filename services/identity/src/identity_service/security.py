@@ -51,7 +51,9 @@ class IssuedTokens:
     expires_in: int
 
 
-def issue_tokens(user_id: UUID, roles: list[str], settings: IdentitySettings) -> IssuedTokens:
+def issue_tokens(
+    user_id: UUID, roles: list[str], settings: IdentitySettings, farmer_verified: bool = False
+) -> IssuedTokens:
     now = datetime.now(UTC)
     common = {
         "sub": str(user_id),
@@ -61,7 +63,14 @@ def issue_tokens(user_id: UUID, roles: list[str], settings: IdentitySettings) ->
     }
     access_ttl = timedelta(minutes=settings.access_token_minutes)
     access = jwt.encode(
-        {**common, "type": "access", "roles": roles, "exp": now + access_ttl},
+        # `fv`: the admin verified this farmer; catalog and land only let verified farmers sell
+        {
+            **common,
+            "type": "access",
+            "roles": roles,
+            "fv": farmer_verified,
+            "exp": now + access_ttl,
+        },
         settings.private_key(),
         algorithm="RS256",
     )

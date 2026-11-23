@@ -2,9 +2,11 @@
 
 Published (through the outbox, in the same transaction as the status change):
     order.placed              checkout succeeded and payment was taken (status CONFIRMED); also a
-                              HARVEST order created after a passed quality check (status PLACED)
-    order.packed              the farmer packed it; quality creates an inspection
-    order.ready_for_dispatch  quality passed; logistics can pool it
+                              HARVEST order created when the farmer marks the harvest ready
+                              (status PLACED, the customer then picks delivery or buy-back)
+    order.packed              the farmer packed it
+    order.ready_for_dispatch  packed (or a harvest the customer wants delivered); logistics can
+                              pool it
     order.pooled              logistics put it on a delivery route (notification tells the customer)
     order.in_transit          the partner picked it up
     order.completed           delivered and closed
@@ -17,10 +19,9 @@ Published (through the outbox, in the same transaction as the status change):
                               stock reserved for `orderId` when it sees this
 
 Consumed:
-    quality.graded      -> ORDER subject: QC_PASSED, then READY_FOR_DISPATCH (result FAIL cancels
-                           the order and refunds it); HARVEST subject: creates the harvest order
-    reservation.accepted -> remembers the reservation (customer, farmer, deposit) for #24
-    harvest.ready       -> remembers the crop and where it is (the pickup point of the harvest)
+    reservation.accepted -> remembers the reservation (customer, farmer, deposit, agreed price)
+    harvest.ready       -> creates the HARVEST order from the harvested weight; the plot is its
+                           pickup point
     reservation.cancelled -> refunds a paid deposit (TODO(M1): event name assumed, owner M7)
     pool.assigned       -> POOLED                      (TODO(M1): payload assumed, owner M2)
     delivery.started    -> IN_TRANSIT                  (TODO(M1): event name assumed, owner M2)
@@ -57,7 +58,6 @@ ORDER_CANCELLED = "order.cancelled"
 ORDER_RATED = "order.rated"
 PAYMENT_SUCCEEDED = "payment.succeeded"
 
-QUALITY_GRADED = "quality.graded"
 RESERVATION_ACCEPTED = "reservation.accepted"
 RESERVATION_CANCELLED = "reservation.cancelled"
 HARVEST_READY = "harvest.ready"
@@ -66,7 +66,6 @@ DELIVERY_STARTED = "delivery.started"
 DELIVERY_COMPLETED = "delivery.completed"
 
 CONSUMED = [
-    QUALITY_GRADED,
     RESERVATION_ACCEPTED,
     RESERVATION_CANCELLED,
     HARVEST_READY,
@@ -86,7 +85,7 @@ class EventItem(ApiModel):
 
 
 class OrderEventPayload(ApiModel):
-    """Payload shared by every order.* event: enough for notification, quality and logistics."""
+    """Payload shared by every order.* event: enough for notification, land and logistics."""
 
     order_id: UUID
     checkout_id: UUID

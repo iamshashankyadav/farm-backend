@@ -6,7 +6,6 @@ approximate: close enough to look right on a map, not survey data. All names are
 Logins (password PASSWORD for everyone except the admin):
     farmers      +91 91000 00001 ... 00008   (the last two are waiting for admin verification)
     customers    +91 92000 00001 ... 00010
-    inspectors   +91 93000 00001 ... 00002
     delivery     +91 94000 00001 ... 00003
 """
 
@@ -343,10 +342,6 @@ CUSTOMERS: tuple[Customer, ...] = (
     Customer("Divya Sharma", "+919200000010", "Tatibandh, Raipur", 21.2237, 81.6628),
 )
 
-INSPECTORS = (
-    ("Asha Tiwari", "+919300000001", 21.1904, 81.2849),  # Durg
-    ("Bharat Soni", "+919300000002", 21.2090, 81.3790),  # Bhilai
-)
 PARTNERS = (
     ("Deepak Rana", "+919400000001"),
     ("Esha Khan", "+919400000002"),

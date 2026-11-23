@@ -4,6 +4,10 @@ One small, believable story around Durg and Bhilai (Chhattisgarh), built through
 `seed/` so every screen has real-looking data. Everything is deterministic: the same logins and the same
 records every time.
 
+> **The team VM holds no demo data** (decision of 2026-11-23): its database keeps only the admin and the
+> accounts people registered themselves. Use this seed on a local stack (`scripts/reset-demo.sh`), or on
+> the VM only after an explicit decision to reseed it.
+
 ## Logins
 
 Password for every account except the admin: **`Farm@12345`**.
@@ -18,7 +22,6 @@ Password for every account except the admin: **`Farm@12345`**.
 | Customer | `+919200000001` | Aarav Mishra, Sector 6, Bhilai | Placed orders, one pending land request |
 | Customer | `+919200000005` | Sanjay Dubey, Durg | An active reservation with a crop timeline and photos |
 | Customer | `+919200000008` | Ritu Jain, Kohka, Bhilai | Harvested rice: a delivery order on the pooled routes |
-| Inspector | `+919300000001`, `+919300000002` | Asha Tiwari, Bharat Soni | No website screens: the role was removed from the site. These accounts let the seed and `journeys.py` file quality reports through the API |
 | Delivery | `+919400000001` to `03` | Deepak Rana, Esha Khan, Farhan Ali | Today's pooled route, pickups and proof of delivery |
 
 All other customers are `+91920000000N` (N = 1 to 10), farmers `+91910000000N` (N = 1 to 8).
@@ -30,9 +33,9 @@ All other customers are `+91920000000N` (N = 1 to 10), farmers `+91910000000N` (
 - **7 plots (2 to 4 acres each)** drawn as polygons near the farms, each with Kharif, Rabi and Zaid seasons.
 - **8 reservations at every stage:** waiting for the farmer, accepted and waiting for the deposit, rejected,
   cancelled, two growing crops (with sown, growing and flowering photos), one harvest waiting for the
-  inspector, and one finished harvest that was passed, delivered through a pooled route.
-- **About 27 orders in every status:** to pack, cancelled, packed and waiting for the inspector, one failed
-  inspection with a lower grade accepted, and the rest inspected, pooled and either delivered (with ratings),
+  customer's delivery or buy-back choice, and one finished harvest delivered through a pooled route.
+- **About 27 orders in every status:** to pack, cancelled, packed and due tomorrow (waiting for tomorrow's
+  route), and the rest packed today, pooled and either delivered with the customer's code (with ratings),
   on the road, or assigned and waiting.
 - **Pooling:** the real job groups the due orders. The biggest route has about ten stops across Bhilai and
   Durg, and the admin page shows the kilometres saved.
@@ -80,7 +83,7 @@ For load and geo-search tests use the generated profile instead: `python -m farm
 1. **Admin:** dashboard numbers, verify Vijay Nishad, open Pooling, pick the biggest route on the map.
 2. **Farmer (Ramesh):** listings with verified photos, pack a waiting order, look at payouts and the rice
    crop timeline.
-3. **Quality check:** the website has no inspector screen. Orders packed during the demo stay at *Packed* until a report is filed through the API (see the quality service docs, or `journeys.py`); the seeded orders are already graded.
+3. **No quality gate:** packing makes an order ready for a delivery partner at once. Quality is judged by the customer: they rate each delivered order, and the farm's rating shows on its listings.
 4. **Customer on the web (Sanjay):** search land on the map, open the active reservation and its photo
    timeline.
 5. **Customer app (Aarav):** browse produce, check out, follow an order on the status rail, rate it.

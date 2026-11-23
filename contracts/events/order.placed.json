@@ -176,12 +176,11 @@
       "type": "string"
     },
     "OrderStatus": {
-      "description": "Lifecycle of a per-farm order (HLD section 11).\n\nPLACED -> CONFIRMED -> PACKED -> QC_PASSED -> READY_FOR_DISPATCH is issue #13. After that\nlogistics drives it: POOLED (pool assigned), IN_TRANSIT (picked up), DELIVERED, COMPLETED.",
+      "description": "Lifecycle of a per-farm order (HLD section 11).\n\nPLACED -> CONFIRMED -> PACKED -> READY_FOR_DISPATCH, then logistics drives it: POOLED (pool\nassigned), IN_TRANSIT (picked up), DELIVERED, COMPLETED. There is no quality gate (removed in\nNovember 2026): packing makes the order ready for dispatch, and the customer's rating after\ndelivery is the quality signal.",
       "enum": [
         "PLACED",
         "CONFIRMED",
         "PACKED",
-        "QC_PASSED",
         "READY_FOR_DISPATCH",
         "POOLED",
         "IN_TRANSIT",

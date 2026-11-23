@@ -169,18 +169,6 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
 
-  quality:
-    <<: *service
-    build:
-      context: .
-      dockerfile: services/quality/Dockerfile
-    # migrations first (inside the service's own schema), then the API
-    command: sh -c "cd services/quality && alembic upgrade head && cd /app && uvicorn quality_service.main:app --host 0.0.0.0 --port 8000"
-    environment:
-      <<: *env
-      DATABASE_URL: postgresql+asyncpg://farm_quality:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      ROOT_PATH: /api/v1/quality
-
   order:
     <<: *service
     build:

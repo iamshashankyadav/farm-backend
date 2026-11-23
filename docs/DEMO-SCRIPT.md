@@ -10,16 +10,17 @@ Two stories, told in the order the platform was designed for (HLD section 5).
 
 1. **Customer (app).** Sign in as Aarav, +919200000001. Browse produce near Bhilai, add tomato from Sahu Krishi Farm and
    cauliflower from a second farm, pay. Two orders appear, one per farm. *Say:* one checkout, one order per farm.
-2. **Farmer (web).** Sign in as Ramesh, +919100000001. **Orders → To pack** shows the new order and the stage bar at 2 of 8.
-   Open **Notifications**: "New order to pack". Press **Mark packed**; the bar moves to 3.
-3. **Quality check (no website screen).** The inspector role was removed from the site, so a newly packed order waits at
-   *Packed* until a report is filed through the API (as `journeys.py` does). For a live demo, use an already graded order
-   instead. *Say:* photos keep their GPS and capture time; the badge says whether it was taken at the farm. Show the listing
-   photo from Verma Organic Farm that is **Unverified** on purpose (6 km away).
-4. **Admin (web).** Sign in as +919999999999 (password in DEMO.md). **Dashboard**: orders per day, sales, inspection pass
-   rate. **Pooling**: pick today, **Run pooling**; routes appear on the map with kilometres saved against separate trips.
+2. **Farmer (web).** Sign in as Ramesh, +919100000001. **Orders → To pack** shows the new order and the stage bar at 2 of 6.
+   Open **Notifications**: "New order to pack". Press **Mark packed**; the bar moves to 3 and the order is ready for a
+   delivery partner (there is no quality gate: the customer's rating after delivery is the quality signal).
+3. **Photos.** *Say:* photos keep their GPS and capture time; the badge says whether it was taken at the farm. Show the
+   listing photo from Verma Organic Farm that is **Unverified** on purpose (6 km away).
+4. **Admin (web).** Sign in as +919999999999 (password in DEMO.md). **Dashboard**: orders per day, sales, customer
+   rating. **Pooling**: pick today, **Run pooling**; routes appear on the map with kilometres saved against separate trips.
    **Orders → Needs a step**: where anything is stuck. *Say:* an admin can cancel and refund from here.
-5. **Delivery partner (app).** Deepak, +919400000001: today's route, pickups, then a drop with the OTP and a photo.
+5. **Delivery partner (app).** Deepak, +919400000001: today's route, pickups, then a drop with a photo and the 4-digit
+   delivery code. Only the customer sees the code (in **My orders**); the partner's route never shows it, and a wrong
+   code is refused.
 6. **Customer and farmer again.** The order reads Delivered, the customer rates it, the farmer's **Earnings** page lists the
    payout under the month.
 
@@ -32,8 +33,9 @@ Two stories, told in the order the platform was designed for (HLD section 5).
 3. **Crops (farmer).** Dinesh, +919100000005, **Crops** (his chana and mustard are already growing): stage bar Sown, Growing, Flowering, Harvest ready; **Post an update** with a photo.
 4. **Customer.** **My reservations → Growing**: the same timeline with the farmer's photos. *Say:* the customer follows the
    crop from a phone without calling anyone.
-5. **Harvest.** Open Ritu's finished rice reservation (+919200000008): harvest ready, inspected by Asha, the customer chose
-   delivery and the order joined a pooled route. The alternative, **buy-back**, is a one-click choice on **My reservations**.
+5. **Harvest.** The farmer marks the crop harvested with its weight; the harvest order appears at once. Ritu's rice
+   (+919200000008) went out on a pooled route. The alternative, **buy-back**, is a choice on **My reservations**: the
+   customer pays the balance and is credited 90% of the harvest's value; the page shows both amounts first.
 
 ## If something goes wrong
 

@@ -1,17 +1,15 @@
-"""Operations seeding: takes the placed orders through packing, inspection, pooling and delivery so
-every part of the apps has data. Everything goes through the public API (the real pooling job
+"""Operations seeding: takes the placed orders through packing, pooling and delivery so every part
+of the apps has data. Everything goes through the public API (the real pooling job
 included); the steps that depend on events poll until the event has been handled.
 
 Orders are split into fixed groups by their position, so the result is the same on every run:
 
-    k % 12 == 0      left CONFIRMED
+    k % 12 in 0, 2   left CONFIRMED (the farmer still has to pack them)
     k % 12 == 1      cancelled by the farmer
-    k % 12 in 2, 3   PACKED, inspection still waiting (shows in the inspector queue)
-    k % 12 == 4      PACKED, inspection FAILED, re-harvest asked
-    k % 12 == 5      PACKED, inspection FAILED, lower grade accepted (goes on to dispatch)
-    k % 12 >= 6      PACKED, inspection PASSED -> READY_FOR_DISPATCH -> pooled
+    k % 12 >= 3      packed -> READY_FOR_DISPATCH (there is no quality gate) -> pooled
 
-Pools are then handled in turn: delivered, in progress (pickups done) or left waiting.
+Pools are then handled in turn: delivered, in progress (pickups done) or left waiting. Each drop is
+delivered with the code its customer reads from their tracking page, as in the apps.
 """
 
 import time
@@ -22,30 +20,22 @@ from uuid import uuid4
 
 from farm_seed.client import Gateway, SeedError
 from farm_seed.data import PASSWORD
-from farm_seed.v1 import _ensure_user, _point
+from farm_seed.v1 import _ensure_user
 
-INSPECTORS = [
-    ("Inspector Asha", "+919000300001", 21.2514, 81.6296),  # Raipur
-    ("Inspector Bharat", "+919000300002", 19.9975, 73.7898),  # Nashik
-    ("Inspector Charu", "+919000300003", 26.9124, 75.7873),  # Jaipur
-]
 PARTNERS = [
     ("Rider Deepak", "+919000400001"),
     ("Rider Esha", "+919000400002"),
     ("Rider Farhan", "+919000400003"),
     ("Rider Gauri", "+919000400004"),
 ]
-MAX_LIFECYCLE_ORDERS = 90  # the inspection list returns at most 100 rows
+MAX_LIFECYCLE_ORDERS = 90
 
 
 @dataclass
 class OpsSummary:
-    inspectors: int = 0
     partners: int = 0
     cancelled: int = 0
     packed: int = 0
-    inspections_reported: int = 0
-    inspections_waiting: int = 0
     pools: int = 0
     pools_delivered: int = 0
     pools_in_progress: int = 0
@@ -70,38 +60,14 @@ def _login(gw: Gateway, cache: dict[str, str], phone: str) -> str:
 
 def _staff(
     gw: Gateway,
-    admin: str,
     summary: OpsSummary,
-    tokens: dict[str, str],
     partner_phone: dict[str, str],
-) -> dict[str, str]:
-    """Create inspectors (role granted by the admin) and delivery partners. Returns inspector
-    token by user id."""
-    by_id: dict[str, str] = {}
-    for name, phone, lat, lng in INSPECTORS:
-        user = _ensure_user(gw, name, phone, ["customer"], lat, lng)["user"]
-        if "inspector" not in user.get("roles", []):
-            gw.call(
-                "PUT",
-                f"/identity/users/{user['id']}/roles",
-                token=admin,
-                json={"roles": ["inspector"]},
-            )
-        tokens.pop(phone, None)  # roles changed: old tokens are revoked
-        token = _login(gw, tokens, phone)
-        gw.call(
-            "PUT",
-            "/quality/inspectors/me/location",
-            token=token,
-            json={"location": _point(lat, lng), "available": True},
-        )
-        by_id[user["id"]] = token
-        summary.inspectors += 1
+) -> None:
+    """Create the delivery partners."""
     for name, phone in PARTNERS:
         partner = _ensure_user(gw, name, phone, ["delivery"])["user"]
         partner_phone[partner["id"]] = phone
         summary.partners += 1
-    return by_id
 
 
 def _confirmed_orders(
@@ -123,11 +89,34 @@ def _confirmed_orders(
     return [(order_id, f_idx) for _, order_id, f_idx in found[:MAX_LIFECYCLE_ORDERS]]
 
 
+def _customer_of(gw: Gateway, tokens: dict[str, str], customer_phones: list[str]) -> dict[str, str]:
+    """Order id -> the phone of the customer who placed it (only they can read its delivery code)."""
+    owner: dict[str, str] = {}
+    for phone in customer_phones:
+        token, cursor = _login(gw, tokens, phone), None
+        while True:
+            query = "/order/orders?role=customer&limit=100" + (
+                f"&cursor={cursor}" if cursor else ""
+            )
+            page = gw.call("GET", query, token=token).json()
+            owner.update({row["id"]: phone for row in page["items"]})
+            cursor = page.get("nextCursor")
+            if not cursor:
+                break
+    return owner
+
+
+def _delivery_code(gw: Gateway, token: str, order_id: str) -> str:
+    track = gw.call("GET", f"/logistics/orders/{order_id}/track", token=token).json()
+    return (track.get("stop") or {}).get("otp") or ""
+
+
 def seed_operations(
     gw: Gateway,
     farmer_phones: list[str],
     admin_phone: str,
     admin_password: str,
+    customer_phones: list[str],
     wait_seconds: float = 90,
 ) -> OpsSummary:
     """Orders are found through each farmer's order list, so this also works on a later run."""
@@ -135,7 +124,7 @@ def seed_operations(
     tokens: dict[str, str] = {}
     admin = gw.login(admin_phone, admin_password)["accessToken"]
     partner_phone: dict[str, str] = {}
-    inspector_tokens = _staff(gw, admin, summary, tokens, partner_phone)
+    _staff(gw, summary, partner_phone)
     orders = _confirmed_orders(gw, farmer_phones, tokens)
 
     # --- cancel and pack ---
@@ -144,7 +133,7 @@ def seed_operations(
     for k, (order_id, f_idx) in enumerate(orders):
         group[order_id] = k % 12
         token = _login(gw, tokens, farmer_phones[f_idx])
-        if k % 12 == 0:
+        if k % 12 in (0, 2):
             continue
         if k % 12 == 1:
             done = gw.call(
@@ -161,42 +150,7 @@ def seed_operations(
             packed.append(order_id)
             summary.packed += 1
 
-    # --- inspections: created by the order.packed event ---
-    def inspections() -> dict[str, dict]:
-        rows = gw.call("GET", "/quality/inspections", token=admin).json()
-        return {r["subjectId"]: r for r in rows if r["subjectType"] == "ORDER"}
-
-    wanted = {o for o in packed}
-    if not _wait(lambda: wanted <= inspections().keys(), wait_seconds):
-        summary.notes.append("not every packed order got an inspection in time (is RabbitMQ up?)")
-    found = inspections()
-    for order_id in packed:
-        inspection = found.get(order_id)
-        g = group[order_id]
-        if inspection is None or inspection["status"] != "PENDING" or g in (2, 3):
-            summary.inspections_waiting += 1 if inspection and g in (2, 3) else 0
-            continue
-        mine = inspector_tokens.get(inspection.get("inspectorId") or "", admin)
-        report: dict = {
-            "grade": "A" if g % 2 else "B",
-            "moisturePct": 11.5,
-            "pestFound": False,
-            "weightKg": 20,
-            "result": "PASS",
-            "note": "Seeded inspection",
-        }
-        if g == 4:
-            report.update(result="FAIL", grade="C", pestFound=True, resolution="REHARVEST")
-        elif g == 5:
-            report.update(
-                result="FAIL", grade="B", resolution="ACCEPT_LOWER_GRADE", acceptedGrade="C"
-            )
-        gw.call("POST", f"/quality/inspections/{inspection['id']}/report", token=mine, json=report)
-        summary.inspections_reported += 1
-
     # --- pooling: the real job over every READY_FOR_DISPATCH order ---
-    # wait for quality.graded to move the passed orders on before running the job
-    time.sleep(min(wait_seconds, 5))
     due = (date.today() + timedelta(days=14)).isoformat()
     pools: list[dict] = []
 
@@ -211,6 +165,7 @@ def seed_operations(
     summary.pools = len(pools)
 
     # --- delivery: partners work through the pools ---
+    customer_of = _customer_of(gw, tokens, customer_phones)
     for i, pool in enumerate(pools):
         # the pooling job assigns a partner; fall back to taking turns if it could not
         phone = partner_phone.get(pool.get("partnerId") or "") or PARTNERS[i % len(PARTNERS)][1]
@@ -225,11 +180,16 @@ def seed_operations(
             summary.pools_in_progress += 1
             continue
         for stop in (s for s in stops if s["stopType"] == "DROP"):
+            buyer = customer_of.get(stop["orderId"])
+            if buyer is None:
+                summary.notes.append(f"no customer found for order {stop['orderId']}")
+                continue
+            code = _delivery_code(gw, _login(gw, tokens, buyer), stop["orderId"])
             gw.call(
                 "POST",
                 f"/logistics/stops/{stop['id']}/deliver",
                 token=token,
-                json={"photoMediaId": str(uuid4()), "otp": stop.get("otp") or "0000"},
+                json={"photoMediaId": str(uuid4()), "otp": code},
             )
         summary.pools_delivered += 1
     return summary

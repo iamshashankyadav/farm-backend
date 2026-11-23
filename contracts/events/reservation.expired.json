@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reservation.expired",
+  "title": "reservation.expired",
+  "description": "Producer: land. A request the farmer did not answer within 48 hours expired; the plot-season is free again.",
+  "type": "object",
+  "required": [
+    "reservationId",
+    "customerId",
+    "farmerId",
+    "cropId"
+  ],
+  "properties": {
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

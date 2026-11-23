@@ -1,6 +1,7 @@
 """Internal routes: reachable only inside the Docker network, never through the gateway."""
 
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -25,6 +26,21 @@ def _address_line(address: dict[str, Any]) -> str:
     return ", ".join(str(p) for p in parts if p)
 
 
+# Rough kilograms per unit, so a vehicle's capacity (in kg) means something for every crop.
+KG_PER_UNIT: dict[str, Decimal] = {
+    "kg": Decimal(1),
+    "quintal": Decimal(100),
+    "litre": Decimal(1),
+    "dozen": Decimal("1.5"),
+    "piece": Decimal("0.5"),
+    "bunch": Decimal("0.25"),
+}
+
+
+def _weight_kg(quantity: Decimal, unit: str | None) -> Decimal:
+    return quantity * KG_PER_UNIT.get((unit or "kg").lower(), Decimal(1))
+
+
 @router.get(
     "/orders/ready-for-dispatch",
     summary="Orders logistics can pool (called by the logistics pooling job)",
@@ -36,10 +52,10 @@ async def ready_for_dispatch(
     """Orders in READY_FOR_DISPATCH whose delivery date is `date` or earlier.
 
     The shape is what the logistics pooling job reads (snake_case keys, not the public camelCase):
-    `order_id`, `hub_lat`/`hub_lng` (where the farm hands the produce over), `drop_lat`/`drop_lng`
-    (the customer's address), `weight_kg` and `address`. Once logistics publishes `pool.assigned`
-    the order moves to POOLED and no longer shows up here.
-    TODO(M1): `weight_kg` adds up the quantities of all items whatever their unit.
+    `order_id`, `customer_id`, `hub_lat`/`hub_lng` (where the farm hands the produce over),
+    `drop_lat`/`drop_lng` (the customer's address), `weight_kg`, `address` and `contact_phone`
+    (so the partner can call the customer). Once logistics publishes `pool.assigned` the order
+    moves to POOLED and no longer shows up here.
     """
     rows = (
         (
@@ -70,8 +86,10 @@ async def ready_for_dispatch(
                 "hub_lng": hub_lng,
                 "drop_lat": drop_lat,
                 "drop_lng": drop_lng,
-                "weight_kg": float(sum(i.quantity for i in row.items)),
+                "weight_kg": float(sum(_weight_kg(i.quantity, i.unit) for i in row.items)),
                 "address": _address_line(row.delivery_address),
+                "customer_id": str(row.customer_id),
+                "contact_phone": row.delivery_address.get("contactPhone"),
             }
         )
     return result

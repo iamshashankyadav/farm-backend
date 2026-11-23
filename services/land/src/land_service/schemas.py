@@ -77,6 +77,8 @@ class SeasonCreate(ApiModel):
     def valid_dates(self):
         if self.end_date <= self.start_date:
             raise ValueError("end_date must be after start_date")
+        if (self.end_date - self.start_date).days > 366:
+            raise ValueError("a season lasts at most a year")
         return self
 
 
@@ -105,7 +107,14 @@ class ReservationOut(ApiModel):
     expected_qty_kg: float
     deposit: float | None
     total: float | None
-    status: str
+    status: str = Field(
+        description=(
+            "PENDING (waiting for the farmer, expires after 48 h), ACCEPTED (waiting for the deposit), "
+            "ACTIVE (growing), HARVEST_READY (harvested; the order is being made), FULFILLING (the "
+            "customer chooses delivery or buy-back, then it is delivered), COMPLETED, REJECTED, "
+            "CANCELLED or EXPIRED"
+        )
+    )
     expires_at: datetime
 
 
@@ -134,3 +143,14 @@ class CropUpdateCreate(ApiModel):
     note: str | None = None
     media_ids: list[UUID] = Field(default_factory=list, max_length=10)
     location: Point | None = None
+
+
+class HarvestReadyIn(ApiModel):
+    """Body of POST /reservations/{id}/harvest-ready (optional): how much was really harvested."""
+
+    harvested_qty_kg: float | None = Field(
+        default=None,
+        gt=0,
+        le=1_000_000,
+        description="Weight harvested; the harvest order is priced on it (default: the expected kg)",
+    )

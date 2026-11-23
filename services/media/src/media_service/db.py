@@ -38,7 +38,7 @@ class Media(Base):
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    owner_service: Mapped[str] = mapped_column(String(20))  # catalog, land, quality, ...
+    owner_service: Mapped[str] = mapped_column(String(20))  # catalog, land, logistics, identity
     owner_type: Mapped[str] = mapped_column(String(20))  # FARM, LISTING, PLOT, ...
     owner_id: Mapped[UUID] = mapped_column(Uuid)
     uploaded_by: Mapped[UUID] = mapped_column(Uuid, index=True)

@@ -4,8 +4,6 @@ Payload fields read (everything else is ignored, so producers can add fields fre
 
 - order.cancelled:  {"orderId": "<uuid>"}  -> release whatever catalog reserved for that order
 - order.rated:      {"farmId": "<uuid>", "score": 1..5}  -> add the score to the farm's average
-- quality.graded:   {"grade": "A"|"B"|"C", "subjectType": "LISTING", "subjectId": "<uuid>"}
-                    and/or {"grade": ..., "listingIds": ["<uuid>", ...]}  -> set the listing grade
 """
 
 import logging
@@ -21,7 +19,7 @@ from farm_common.outbox import mark_processed
 
 logger = logging.getLogger(__name__)
 
-BINDINGS = ["order.cancelled", "order.rated", "quality.graded"]
+BINDINGS = ["order.cancelled", "order.rated"]
 
 
 def _uuids(values: object) -> list[UUID]:
@@ -54,24 +52,9 @@ async def on_order_rated(session: AsyncSession, event: Event) -> None:
     await service.add_farm_rating(session, UUID(str(farm_id)), score)
 
 
-async def on_quality_graded(session: AsyncSession, event: Event) -> None:
-    grade = event.payload.get("grade")
-    if grade not in ("A", "B", "C"):
-        logger.info(
-            "quality.graded %s has grade %r; listing grade unchanged", event.event_id, grade
-        )
-        return
-    listing_ids = _uuids(event.payload.get("listingIds"))
-    if event.payload.get("subjectType") == "LISTING":
-        listing_ids += _uuids([event.payload.get("subjectId")])
-    if listing_ids:
-        await service.set_grade(session, listing_ids, grade)
-
-
 HANDLERS: dict[str, Callable[[AsyncSession, Event], Awaitable[None]]] = {
     "order.cancelled": on_order_cancelled,
     "order.rated": on_order_rated,
-    "quality.graded": on_quality_graded,
 }
 
 

@@ -58,9 +58,9 @@ class PaymentRow(Base):
 class HarvestRow(Base):
     """What the order service knows about a land reservation (V2, issue #24).
 
-    Filled from `reservation.accepted` (who and the deposit), `harvest.ready` (crop, expected
-    quantity, where the crop is) and `quality.graded` (result, weight). The harvest order is
-    created from it once the quality check passes.
+    Filled from `reservation.accepted` (who, the deposit and the agreed price) and `harvest.ready`
+    (crop, harvested quantity, where the crop is). The harvest order is created from it as soon as
+    the farmer marks the harvest ready.
     """
 
     __tablename__ = "harvest_reservations"
@@ -79,8 +79,6 @@ class HarvestRow(Base):
     deposit_payment_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     deposit_paid: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal(0))
     deposit_refunded: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal(0))
-    quality_result: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    quality_grade: Mapped[str | None] = mapped_column(String(2), nullable=True)
     order_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

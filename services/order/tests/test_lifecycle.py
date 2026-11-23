@@ -47,19 +47,27 @@ async def pack(api, order_id: str):
 # --- packing -----------------------------------------------------------------------------------
 
 
-async def test_farmer_packs_own_order_and_order_packed_is_published(api):
+async def test_farmer_packs_own_order_and_it_is_ready_for_dispatch(api):
     order = await api.placed_order(FARM_A)
 
     response = await pack(api, order["id"])
 
     assert response.status_code == 200
-    assert response.json()["status"] == "PACKED"
-    assert [e["status"] for e in response.json()["events"]] == ["PLACED", "CONFIRMED", "PACKED"]
-    (event,) = await api.outbox("order.packed")
-    payload = OrderEventPayload.model_validate(event.payload)
+    assert response.json()["status"] == "READY_FOR_DISPATCH"
+    assert [e["status"] for e in response.json()["events"]] == [
+        "PLACED",
+        "CONFIRMED",
+        "PACKED",
+        "READY_FOR_DISPATCH",
+    ]
+    (packed,) = await api.outbox("order.packed")
+    payload = OrderEventPayload.model_validate(packed.payload)
     assert str(payload.order_id) == order["id"]
     assert payload.status == "PACKED"
     assert payload.items[0].name == "Tomato"
+    (ready,) = await api.outbox("order.ready_for_dispatch")
+    assert ready.payload["orderId"] == order["id"]
+    assert ready.payload["status"] == "READY_FOR_DISPATCH"
 
 
 async def test_farmer_cannot_pack_another_farms_order(api):
@@ -87,70 +95,22 @@ async def test_packing_twice_is_rejected(api):
     assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
 
 
-# --- quality, delivery events ------------------------------------------------------------------
+# --- delivery events ---------------------------------------------------------------------------
 
 
-async def test_quality_graded_moves_a_packed_order_to_ready_for_dispatch(api):
+async def test_a_packed_order_can_no_longer_be_cancelled(api):
     order = await api.placed_order()
     await pack(api, order["id"])
 
-    await deliver(api, "quality.graded", subjectType="ORDER", subjectId=order["id"], grade="A")
+    response = await api.http.post(f"/orders/{order['id']}/cancel")
 
-    detail = (await api.http.get(f"/orders/{order['id']}")).json()
-    assert detail["status"] == "READY_FOR_DISPATCH"
-    assert [e["status"] for e in detail["events"]][-2:] == ["QC_PASSED", "READY_FOR_DISPATCH"]
-    (event,) = await api.outbox("order.ready_for_dispatch")
-    assert event.payload["orderId"] == order["id"]
-
-
-async def test_quality_graded_accepts_a_plain_order_id(api):
-    order = await api.placed_order()
-    await pack(api, order["id"])
-
-    await deliver(api, "quality.graded", orderId=order["id"], grade="B")
-
-    assert await status_of(api, order["id"]) == "READY_FOR_DISPATCH"
-
-
-async def test_quality_graded_is_applied_once_when_delivered_twice(api):
-    order = await api.placed_order()
-    await pack(api, order["id"])
-    event = await deliver(api, "quality.graded", orderId=order["id"], grade="A")
-
-    await consumers.handle_event(api.session_factory, event)  # redelivery of the same event
-
-    assert len(await api.outbox("order.ready_for_dispatch")) == 1
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"subject_type": "HARVEST", "subject_id": "00000000-0000-4000-8000-000000000001"},
-        {"orderId": str(uuid4())},  # unknown order
-        {"orderId": "not-a-uuid"},
-        {},
-    ],
-)
-async def test_quality_graded_for_other_things_is_ignored(api, payload):
-    await api.placed_order()
-
-    await deliver(api, "quality.graded", **payload)
-
-    assert await api.outbox("order.ready_for_dispatch") == []
-
-
-async def test_quality_graded_for_an_order_that_is_not_packed_is_ignored(api):
-    order = await api.placed_order()
-
-    await deliver(api, "quality.graded", orderId=order["id"], grade="A")
-
-    assert await status_of(api, order["id"]) == "CONFIRMED"
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "ORDER_NOT_CANCELLABLE"
 
 
 async def _dispatchable(api) -> str:
     order = await api.placed_order()
     await pack(api, order["id"])
-    await deliver(api, "quality.graded", orderId=order["id"], grade="A")
     return order["id"]
 
 
@@ -458,50 +418,12 @@ async def test_another_farmer_cannot_cancel_it(api):
     assert (await api.http.post(f"/orders/{order['id']}/cancel")).status_code == 404
 
 
-async def test_a_failed_inspection_cancels_the_packed_order_and_refunds_it(api):
-    order = await api.placed_order(FARM_A)
-    await pack(api, order["id"])
-
-    await deliver(
-        api,
-        "quality.graded",
-        subjectType="ORDER",
-        subjectId=order["id"],
-        grade="C",
-        result="FAIL",
-    )
-
-    detail = (await api.http.get(f"/orders/{order['id']}")).json()
-    assert detail["status"] == "CANCELLED"
-    assert detail["events"][-1]["note"] == "QUALITY_FAILED"
-    assert detail["payments"][-1]["kind"] == "REFUND"
-    (cancelled,) = await api.outbox("order.cancelled")
-    payload = OrderCancelledPayload.model_validate(cancelled.payload)
-    assert (payload.cancelled_by, payload.reason) == ("system", "QUALITY_FAILED")
-    assert payload.refund_amount == detail["total"]
-    assert await api.outbox("order.ready_for_dispatch") == []
-
-
-async def test_a_passed_inspection_with_a_result_makes_the_order_ready(api):
-    order = await api.placed_order(FARM_A)
-    await pack(api, order["id"])
-
-    await deliver(
-        api, "quality.graded", subjectType="ORDER", subjectId=order["id"], grade="A", result="PASS"
-    )
-
-    assert await status_of(api, order["id"]) == "READY_FOR_DISPATCH"
-
-
 # --- the feed logistics pools from -------------------------------------------------------------
 
 
 async def ready_order(api, farm=FARM_A) -> dict:
     order = await api.placed_order(farm)
     await pack(api, order["id"])
-    await deliver(
-        api, "quality.graded", subjectType="ORDER", subjectId=order["id"], grade="A", result="PASS"
-    )
     return order
 
 
@@ -523,6 +445,8 @@ async def test_dispatch_feed_lists_ready_orders_in_the_shape_logistics_reads(api
         "drop_lng": 75.7873,
         "weight_kg": 2.0,
         "address": "12 Green Park, Jaipur, 302001",
+        "customer_id": str(CUSTOMER),
+        "contact_phone": None,
     }
 
 
@@ -555,3 +479,15 @@ async def test_completing_an_order_records_the_farmers_payout(api):
     assert mine["total"] == detail["subtotal"]
     api.login(user(uuid4(), Role.FARMER))
     assert (await api.http.get("/orders/payouts")).json() == {"items": [], "total": 0}
+
+
+async def test_the_order_list_shows_the_customers_rating(api):
+    order_id = await _dispatchable(api)
+    await deliver(api, "delivery.completed", orderId=order_id)
+
+    before = (await api.http.get("/orders")).json()["items"]
+    await api.http.post(f"/orders/{order_id}/rating", json={"score": 4})
+    after = (await api.http.get("/orders")).json()["items"]
+
+    assert [o["ratingScore"] for o in before if o["id"] == order_id] == [None]
+    assert [o["ratingScore"] for o in after if o["id"] == order_id] == [4]

@@ -429,6 +429,8 @@ async def test_track_order_live_with_partner_location(
                 lng=81.3,
                 address="Sector 5, Durg",
                 status=StopStatus.PENDING,
+                customer_id=customer_id,
+                otp="4821",
             )
         )
         session.add(
@@ -453,6 +455,77 @@ async def test_track_order_live_with_partner_location(
     assert data["partnerLat"] == pytest.approx(21.15)
     assert data["partnerLng"] == pytest.approx(81.25)
     assert data["stop"]["address"] == "Sector 5, Durg"
+    assert data["stop"]["otp"] == "4821"  # the customer reads it to the partner
+
+    stranger = await client.get(
+        f"/orders/{order_id}/track", headers=make_token(uuid4(), "customer")
+    )
+    assert stranger.status_code == 404
+    admin = await client.get(f"/orders/{order_id}/track", headers=make_token(uuid4(), "admin"))
+    assert admin.status_code == 200
+    assert admin.json()["stop"]["otp"] is None
+    route = await client.get(
+        "/my-route", params={"pool_date": "2026-11-18"}, headers=make_token(partner_id, "delivery")
+    )
+    assert [s["otp"] for s in route.json()["stops"]] == [None]
+
+
+@pytest.mark.asyncio
+async def test_a_drop_needs_its_pickup_and_the_right_code(
+    client: AsyncClient,
+    make_token,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    partner, pool_id, order_id = uuid4(), uuid4(), uuid4()
+    pickup_id, drop_id = uuid4(), uuid4()
+    async with session_factory() as session, session.begin():
+        session.add(
+            DeliveryPool(
+                id=pool_id,
+                pool_date=date(2026, 11, 18),
+                partner_id=partner,
+                status=PoolStatus.ASSIGNED,
+            )
+        )
+        for stop_id, kind, seq, otp in (
+            (pickup_id, StopType.PICKUP, 1, None),
+            (drop_id, StopType.DROP, 2, "4821"),
+        ):
+            session.add(
+                PoolStop(
+                    id=stop_id,
+                    pool_id=pool_id,
+                    order_id=order_id,
+                    stop_type=kind,
+                    seq=seq,
+                    lat=21.2,
+                    lng=81.3,
+                    status=StopStatus.PENDING,
+                    otp=otp,
+                )
+            )
+    headers = make_token(partner, "delivery")
+    proof = {"photoMediaId": str(uuid4())}
+
+    too_early = await client.post(
+        f"/stops/{drop_id}/deliver", json={**proof, "otp": "4821"}, headers=headers
+    )
+    await client.post(f"/stops/{pickup_id}/pickup", json={}, headers=headers)
+    wrong = await client.post(
+        f"/stops/{drop_id}/deliver", json={**proof, "otp": "1111"}, headers=headers
+    )
+    right = await client.post(
+        f"/stops/{drop_id}/deliver", json={**proof, "otp": "4821"}, headers=headers
+    )
+    skip_done = await client.post(f"/stops/{drop_id}/skip", json={}, headers=headers)
+
+    assert too_early.status_code == 409
+    assert too_early.json()["error"]["code"] == "PICKUP_FIRST"
+    assert wrong.status_code == 422
+    assert wrong.json()["error"]["code"] == "INVALID_OTP"
+    assert right.status_code == 200
+    assert right.json()["otp"] is None  # the partner's view never shows the code
+    assert skip_done.status_code == 409
 
 
 @pytest.mark.asyncio

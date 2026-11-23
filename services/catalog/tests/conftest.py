@@ -47,12 +47,14 @@ PUBLIC_KEY = (
 )
 
 
-def token_for(user_id: UUID, *roles: str) -> dict[str, str]:
-    """Authorization header for a user, signed like the identity service signs tokens."""
+def token_for(user_id: UUID, *roles: str, verified: bool = True) -> dict[str, str]:
+    """Authorization header for a user, signed like the identity service signs tokens.
+    `verified` is the `fv` claim: farmers are admin-verified unless a test says otherwise."""
     now = datetime.now(UTC)
     claims = {
         "sub": str(user_id),
         "roles": list(roles),
+        "fv": verified,
         "type": "access",
         "iss": "farm-identity",
         "aud": "farm-platform",

@@ -50,7 +50,7 @@ phone first usually drops the GPS, and the photo then shows as unverified (`NO_G
 `media.media`: `id, owner_service, owner_id, url, thumb_url, exif_time, is_geo_verified`,
 `taken_at POINT` (PostGIS, GiST-indexed), plus `owner_type`, `status`, `geo_status` (why it is or
 isn't verified), `distance_m` and upload bookkeeping. `owner_service` follows `ownerType`:
-FARM/LISTING → catalog, PLOT/RESERVATION → land, INSPECTION → quality, DELIVERY → logistics,
+FARM/LISTING → catalog, PLOT/RESERVATION → land, DELIVERY → logistics,
 USER → identity.
 
 ### The worker (arq, HLD section 8)

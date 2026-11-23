@@ -1,4 +1,4 @@
-"""Admin routes: user lists, farmer verification, granting inspector/admin roles."""
+"""Admin routes: user lists, farmer verification, granting the admin role."""
 
 from uuid import UUID
 
@@ -73,7 +73,7 @@ async def set_roles(
     _: CurrentUser = Depends(admin_only),
     session: AsyncSession = Depends(get_session),
 ) -> UserOut:
-    """Replace a user's roles (the only way to grant inspector or admin). Ends their sessions."""
+    """Replace a user's roles (the only way to grant admin). Ends their sessions."""
     user = await get_user(session, user_id)
     user.set_roles([str(r) for r in body.roles])
     await revoke_all_refresh_tokens(session, user.id)

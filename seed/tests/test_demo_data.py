@@ -10,7 +10,7 @@ CATALOG = {c[0]: c[3] for c in CATALOG_CROPS}  # crop id -> default unit
 
 def test_phones_are_unique():
     phones = [f.phone for f in D.FARMERS] + [c.phone for c in D.CUSTOMERS]
-    phones += [i[1] for i in D.INSPECTORS] + [p[1] for p in D.PARTNERS]
+    phones += [p[1] for p in D.PARTNERS]
     assert len(phones) == len(set(phones))
 
 

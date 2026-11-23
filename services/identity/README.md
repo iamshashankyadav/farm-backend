@@ -30,7 +30,7 @@ that holds the JWT **private** key; every other service verifies tokens with the
 | GET | `/users?role&farmerVerified&limit&cursor` | admin | List users |
 | GET | `/users/{id}` | admin | One user |
 | POST | `/users/{id}/verify-farmer` | admin | Mark farmer verified (`farmer.verified`) |
-| PUT | `/users/{id}/roles` | admin | Replace roles (only way to grant inspector / admin); ends their sessions |
+| PUT | `/users/{id}/roles` | admin | Replace roles (only way to grant admin); ends their sessions |
 | GET | `/internal/users/{id}` | other services | User details (not exposed by the gateway) |
 | GET | `/internal/auth/verify` | Traefik forward-auth | 200 + `X-User-Id`, `X-User-Roles`, or 401 |
 

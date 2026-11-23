@@ -17,7 +17,6 @@ from catalog_service.schemas import (
     FarmOut,
     FarmPage,
     FarmUpdate,
-    Grade,
     ListingFeature,
     ListingFeatureCollection,
     ListingIn,
@@ -28,11 +27,13 @@ from catalog_service.schemas import (
     ListingUpdate,
     SearchSort,
 )
-from farm_common.auth import CurrentUser, Role, require_roles
+from farm_common.auth import CurrentUser, Role, require_roles, require_verified_farmer
 from farm_common.errors import AppError
 
 router = APIRouter()
 farmer_only = require_roles(Role.FARMER)
+# selling needs an admin-verified farmer (403 FARMER_NOT_VERIFIED otherwise)
+seller = require_verified_farmer()
 farmer_or_admin = require_roles(Role.FARMER, Role.ADMIN)
 
 LIMIT = Query(default=20, ge=1, le=100)
@@ -45,7 +46,6 @@ IDEMPOTENCY_KEY = Header(
     description="Optional. Repeating a request with the same key returns the first response; "
     "the same key with a different body gives 409 IDEMPOTENCY_KEY_REUSED.",
 )
-GRADES_AT_LEAST = {Grade.A: ["A"], Grade.B: ["A", "B"], Grade.C: ["A", "B", "C"]}
 
 
 def _offset(cursor: str | None) -> int:
@@ -82,7 +82,7 @@ async def list_crops(session: AsyncSession = Depends(get_session)) -> list[CropO
 async def create_farm(
     body: FarmIn,
     idempotency_key: str | None = IDEMPOTENCY_KEY,
-    user: CurrentUser = Depends(farmer_only),
+    user: CurrentUser = Depends(seller),
     session: AsyncSession = Depends(get_session),
 ) -> FarmOut | Response:
     digest = idempotency.request_hash("POST /farms", body)
@@ -189,7 +189,7 @@ async def farm_listings(
 async def create_listing(
     body: ListingIn,
     idempotency_key: str | None = IDEMPOTENCY_KEY,
-    user: CurrentUser = Depends(farmer_only),
+    user: CurrentUser = Depends(seller),
     session: AsyncSession = Depends(get_session),
 ) -> ListingOut | Response:
     """Publish produce on one of your farms. Publishes `listing.published`.
@@ -263,9 +263,6 @@ async def search_listings(
     crop: str | None = Query(default=None, description="Crop id, e.g. 'tomato'"),
     min_price: float | None = Query(default=None, ge=0),
     max_price: float | None = Query(default=None, ge=0),
-    grade: Grade | None = Query(
-        default=None, description="Minimum grade: B returns A and B (ungraded listings excluded)"
-    ),
     organic: bool | None = None,
     sort: SearchSort = SearchSort.DISTANCE,
     limit: int = Query(default=20, ge=1, le=50),
@@ -292,8 +289,6 @@ async def search_listings(
         query = query.where(Listing.price_per_unit >= min_price)
     if max_price is not None:
         query = query.where(Listing.price_per_unit <= max_price)
-    if grade is not None:
-        query = query.where(Listing.grade.in_(GRADES_AT_LEAST[grade]))
     if organic is not None:
         query = query.where(Listing.is_organic.is_(organic))
     order = {

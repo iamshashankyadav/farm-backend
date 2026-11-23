@@ -24,14 +24,15 @@ from farm_common.schemas import ApiModel
 class OrderStatus(StrEnum):
     """Lifecycle of a per-farm order (HLD section 11).
 
-    PLACED -> CONFIRMED -> PACKED -> QC_PASSED -> READY_FOR_DISPATCH is issue #13. After that
-    logistics drives it: POOLED (pool assigned), IN_TRANSIT (picked up), DELIVERED, COMPLETED.
+    PLACED -> CONFIRMED -> PACKED -> READY_FOR_DISPATCH, then logistics drives it: POOLED (pool
+    assigned), IN_TRANSIT (picked up), DELIVERED, COMPLETED. There is no quality gate (removed in
+    November 2026): packing makes the order ready for dispatch, and the customer's rating after
+    delivery is the quality signal.
     """
 
     PLACED = "PLACED"
     CONFIRMED = "CONFIRMED"
     PACKED = "PACKED"
-    QC_PASSED = "QC_PASSED"
     READY_FOR_DISPATCH = "READY_FOR_DISPATCH"
     POOLED = "POOLED"
     IN_TRANSIT = "IN_TRANSIT"
@@ -302,6 +303,9 @@ class OrderSummary(ApiModel):
     item_count: int
     total: float
     currency: str = "INR"
+    rating_score: int | None = Field(
+        default=None, description="The customer's score (1-5) once a completed order is rated"
+    )
     created_at: datetime
     updated_at: datetime
 

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reservation.requested",
+  "title": "reservation.requested",
+  "description": "Producer: land. A customer asked to reserve a plot-season. The farmer has 48 hours to accept or reject it.",
+  "type": "object",
+  "required": [
+    "reservationId",
+    "customerId",
+    "farmerId",
+    "cropId"
+  ],
+  "properties": {
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    },
+    "plotTitle": {
+      "type": "string"
+    },
+    "season": {
+      "type": "string"
+    },
+    "expectedQtyKg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true
+}

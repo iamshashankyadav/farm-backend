@@ -39,9 +39,6 @@ http:
     strip-media:
       stripPrefix:
         prefixes: [/api/v1/media]
-    strip-quality:
-      stripPrefix:
-        prefixes: [/api/v1/quality]
     strip-order:
       stripPrefix:
         prefixes: [/api/v1/order]
@@ -77,12 +74,6 @@ http:
       entryPoints: [web]
       middlewares: [block-internal]
       service: media
-    quality-internal-blocked:
-      rule: PathRegexp(`^/api/v1/quality/internal(/|$)`)
-      priority: 100
-      entryPoints: [web]
-      middlewares: [block-internal]
-      service: quality
     order-internal-blocked:
       rule: PathRegexp(`^/api/v1/order/internal(/|$)`)
       priority: 100
@@ -131,12 +122,6 @@ http:
       entryPoints: [web]
       middlewares: [cors, rate-limit, strip-media]
       service: media
-    quality:
-      rule: PathPrefix(`/api/v1/quality`)
-      priority: 10
-      entryPoints: [web]
-      middlewares: [cors, rate-limit, strip-quality]
-      service: quality
     order:
       rule: PathPrefix(`/api/v1/order`)
       priority: 10
@@ -173,10 +158,6 @@ http:
       loadBalancer:
         servers:
           - url: http://media:8000
-    quality:
-      loadBalancer:
-        servers:
-          - url: http://quality:8000
     order:
       loadBalancer:
         servers:

@@ -5,7 +5,7 @@ publishes the same events as real traffic). It has two profiles:
 
 | Profile | Command | What it is for |
 | --- | --- | --- |
-| `demo` (default) | `scripts/reset-demo.sh` | A small, believable story around Durg and Bhilai: named farmers and farms, real openly licensed photos with GPS, plots, reservations at every stage, orders in every status, inspections, pooled routes and deliveries. See [docs/DEMO.md](../docs/DEMO.md) for the logins and the tour. |
+| `demo` (default) | `scripts/reset-demo.sh` | A small, believable story around Durg and Bhilai: named farmers and farms, real openly licensed photos with GPS, plots, reservations at every stage, orders in every status, pooled routes and deliveries made with each customer's delivery code. See [docs/DEMO.md](../docs/DEMO.md) for the logins and the tour. |
 | `volume` | `python -m farm_seed --profile volume ...` | Generated people and orders in bulk, for load and geo-search tests. Not meant to be shown. |
 
 The demo profile needs an **empty** database (it refuses to run if the demo farmer already exists):
@@ -14,8 +14,8 @@ Photos live in `seed/assets/photos` with their authors and licences in `seed/ass
 `seed/tools/fetch_photos.py` re-downloads them from Wikimedia Commons.
 
 **Journeys** (`python -m farm_seed.journeys`): two scripted API walks with an assertion at every status change,
-using people created for the run. V1 is listing, order, pack, inspection, pooling, delivery, rating and payout;
-V2 is plot, reservation, deposit, crop update, harvest, inspection, then delivery for one customer and buy-back
+using people created for the run. V1 is an unverified farmer refused, then listing, order, pack, pooling, delivery with the customer's code, rating and payout;
+V2 is plot, reservation, deposit, crop update, harvest with its weight, then a pooled delivery for one customer and buy-back
 for another. Both also check that customers and farmers are notified. They run in CI (`.github/workflows/journeys.yml`)
 against an empty stack, and take about 15 seconds each locally:
 
@@ -53,16 +53,15 @@ who have none yet, so re-running does not duplicate them. Orders are placed agai
 (each order needs a fresh payment), so run with `--orders 0` when re-running.
 
 **Operations (runs last, `--skip-ops` to leave it out):** takes up to 90 of the placed orders through the
-whole flow with API calls only, so every app has data: some stay CONFIRMED, some are cancelled, some
-are packed and wait in the inspector queue, some inspections fail (re-harvest, or lower grade
-accepted), and the passed ones become READY_FOR_DISPATCH. Then it runs the real pooling job
-(`POST /logistics/pools/run`) and delivery partners work the pools: some delivered, some with pickups
-done (in progress), some untouched. It also creates 3 inspectors (`+919000300001` to `03`) and 4
-delivery partners (`+919000400001` to `04`), same password, with the inspector role granted by the
-admin. The steps that rely on events poll for up to 90 seconds, so RabbitMQ and the workers must be
-up. Run it on a fresh database: it only picks up orders that are still CONFIRMED.
+whole flow with API calls only, so every app has data: some stay CONFIRMED, some are cancelled, and the
+rest are packed, which makes them READY_FOR_DISPATCH (there is no quality gate). Then it runs the real
+pooling job (`POST /logistics/pools/run`) and delivery partners work the pools: some delivered (each
+drop with the code its customer reads from their tracking page), some with pickups done (in progress),
+some untouched. It also creates 4 delivery partners (`+919000400001` to `04`), same password. The
+steps that rely on events poll for up to 90 seconds, so RabbitMQ and the workers must be up. Run it
+on a fresh database: it only picks up orders that are still CONFIRMED.
 
-Not seeded yet: photos (media needs object storage), so inspection reports and proof of delivery
-carry no real photos (delivery uses a random media id).
+Not seeded yet in this profile: photos (media needs object storage), so proof of delivery carries no
+real photo (a random media id).
 Reservations become ACTIVE only once RabbitMQ delivers the deposit event, so crop updates for a
 just-paid reservation can be skipped by the API; the seeder ignores that.

@@ -82,8 +82,7 @@ S = OrderStatus
 ALLOWED: dict[OrderStatus, set[OrderStatus]] = {
     S.PLACED: {S.CONFIRMED, S.CANCELLED},
     S.CONFIRMED: {S.PACKED, S.CANCELLED},
-    S.PACKED: {S.QC_PASSED, S.CANCELLED},
-    S.QC_PASSED: {S.READY_FOR_DISPATCH, S.CANCELLED},
+    S.PACKED: {S.READY_FOR_DISPATCH, S.CANCELLED},
     S.READY_FOR_DISPATCH: {S.POOLED, S.IN_TRANSIT, S.DELIVERED},
     S.POOLED: {S.IN_TRANSIT, S.DELIVERED},
     S.IN_TRANSIT: {S.DELIVERED},
@@ -91,8 +90,8 @@ ALLOWED: dict[OrderStatus, set[OrderStatus]] = {
     S.COMPLETED: set(),
     S.CANCELLED: set(),
 }
-# A customer can cancel until the order has been handed to logistics.
-CANCELLABLE = {S.PLACED, S.CONFIRMED, S.PACKED, S.QC_PASSED}
+# An order can be cancelled until the farmer packs it; packing hands it to logistics.
+CANCELLABLE = {S.PLACED, S.CONFIRMED, S.PACKED}
 
 _CENT = Decimal("0.01")
 _IST = ZoneInfo("Asia/Kolkata")
@@ -422,7 +421,13 @@ async def pack_order(session: AsyncSession, user: CurrentUser, order_id: UUID) -
     # send it, any farmer can pack. Tighten once catalog is merged.
     if not is_admin and order.farm_owner_id is not None and str(order.farm_owner_id) != user.id:
         raise Forbidden("This order belongs to another farm")
-    await _transition(session, order, S.PACKED, ev.ORDER_PACKED)
+    if order.order_type != "PRODUCE":
+        raise Conflict("A harvest order is not packed by hand", code="INVALID_STATUS_TRANSITION")
+    # No quality gate: a packed order is ready for the delivery partner straight away.
+    await _transition(session, order, S.PACKED, ev.ORDER_PACKED, note="Packed by the farmer")
+    await _transition(
+        session, order, S.READY_FOR_DISPATCH, ev.ORDER_READY_FOR_DISPATCH, note="Ready for pickup"
+    )
     await session.commit()
     return await _detail(session, order_id, refresh=True)
 
@@ -551,7 +556,7 @@ async def list_orders(
             await session.execute(
                 select(OrderRow)
                 .where(*conditions)
-                .options(selectinload(OrderRow.items))
+                .options(selectinload(OrderRow.items), selectinload(OrderRow.rating))
                 .order_by(OrderRow.created_at.desc(), OrderRow.id.desc())
                 .limit(limit + 1)
             )
@@ -574,6 +579,7 @@ async def list_orders(
                 item_count=len(r.items),
                 total=float(r.total),
                 currency=r.currency,
+                rating_score=r.rating.score if r.rating else None,
                 created_at=r.created_at,
                 updated_at=r.updated_at,
             )

@@ -22,7 +22,6 @@ Running 14 containers on a single 4 GB VM requires strict memory limits and a sw
 | **land**            | Plots, soil, leasing | 256 MB | 128 MB |
 | **media**           | Image upload & metadata API | 256 MB | 128 MB |
 | **media-worker**    | Thumbnail generator (arq) | 256 MB | 128 MB |
-| **quality**         | Inspections & certifications | 256 MB | 128 MB |
 | **order**           | Escrow & payments | 256 MB | 128 MB |
 | **logistics**       | Delivery routes & tracking | 256 MB | 128 MB |
 | **notification**    | Push notifications & alerts | 256 MB | 128 MB |
@@ -118,7 +117,6 @@ Both the mobile application and frontend point to this staging endpoint:
 | **Catalog Service** | `https://staging.farm-direct.app/api/v1/catalog` | `.../api/v1/catalog/docs` |
 | **Land Service** | `https://staging.farm-direct.app/api/v1/land` | `.../api/v1/land/docs` |
 | **Media Service** | `https://staging.farm-direct.app/api/v1/media` | `.../api/v1/media/docs` |
-| **Quality Service** | `https://staging.farm-direct.app/api/v1/quality` | `.../api/v1/quality/docs` |
 | **Order Service** | `https://staging.farm-direct.app/api/v1/order` | `.../api/v1/order/docs` |
 | **Logistics Service** | `https://staging.farm-direct.app/api/v1/logistics` | `.../api/v1/logistics/docs` |
 | **Notification Service**| `https://staging.farm-direct.app/api/v1/notification` | `.../api/v1/notification/docs` |

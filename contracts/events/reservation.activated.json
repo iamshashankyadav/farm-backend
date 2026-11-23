@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reservation.activated",
+  "title": "reservation.activated",
+  "description": "Producer: land. The deposit was paid (payment.succeeded, kind DEPOSIT), so the reservation is ACTIVE and the farmer can start growing.",
+  "type": "object",
+  "required": [
+    "reservationId",
+    "customerId",
+    "farmerId",
+    "cropId"
+  ],
+  "properties": {
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    },
+    "deposit": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

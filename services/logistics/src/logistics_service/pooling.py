@@ -18,9 +18,11 @@ Steps:
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 from geoalchemy2.elements import WKTElement
 from sqlalchemy import func, select
@@ -43,6 +45,13 @@ from logistics_service.sequencing import PartnerCandidate, pick_partner, sequenc
 from logistics_service.settings import LogisticsSettings
 
 logger = logging.getLogger(__name__)
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def india_today() -> date:
+    """Delivery dates are India dates (the order service stores them that way)."""
+    return datetime.now(IST).date()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -139,8 +148,10 @@ async def _persist_pool(
     seq = 1
 
     def _make_stop(order: Order, stype: StopType, s: int, eta: datetime | None) -> PoolStop:
-        lat = order["drop_lat"] if stype == StopType.DROP else order["hub_lat"]
-        lng = order["drop_lng"] if stype == StopType.DROP else order["hub_lng"]
+        drop = stype == StopType.DROP
+        lat = order["drop_lat"] if drop else order["hub_lat"]
+        lng = order["drop_lng"] if drop else order["hub_lng"]
+        customer = order.get("customer_id")
         return PoolStop(
             id=uuid4(),
             pool_id=pool_id,
@@ -154,6 +165,11 @@ async def _persist_pool(
             eta=eta,
             status=StopStatus.PENDING,
             weight_kg=order.get("weight_kg"),
+            customer_id=UUID(str(customer)) if customer else None,
+            # the partner calls the customer at the door; nobody needs a phone for a farm pickup
+            customer_phone=order.get("contact_phone") if drop else None,
+            # proof of delivery: the customer reads this code to the partner (only they see it)
+            otp=f"{secrets.randbelow(10_000):04d}" if drop else None,
         )
 
     # We model each order as 2 stops: PICKUP at its farm/hub, DROP at the customer. All pickups
@@ -238,6 +254,39 @@ async def run_pooling(
     """
     if not orders:
         logger.info("No orders to pool on %s", pool_date)
+        return []
+    # One run at a time (the admin button and the nightly job may meet), and an order that is
+    # already on a route (its pool.assigned is still on the way to the order service) is skipped.
+    async with session_factory() as lock:
+        await lock.execute(select(func.pg_advisory_lock(POOLING_LOCK_KEY)))
+        try:
+            return await _pool(pool_date, orders, session_factory, settings)
+        finally:
+            await lock.execute(select(func.pg_advisory_unlock(POOLING_LOCK_KEY)))
+
+
+POOLING_LOCK_KEY = 7_202_611  # any constant; names the "pooling run" advisory lock
+
+
+async def _pool(
+    pool_date: date,
+    orders: list[Order],
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: LogisticsSettings,
+) -> list[DeliveryPool]:
+    async with session_factory() as session:
+        on_a_route = set(
+            (
+                await session.execute(
+                    select(PoolStop.order_id).where(
+                        PoolStop.order_id.in_([UUID(str(o["order_id"])) for o in orders])
+                    )
+                )
+            ).scalars()
+        )
+    orders = [o for o in orders if UUID(str(o["order_id"])) not in on_a_route]
+    if not orders:
+        logger.info("Every order due on %s is already on a route", pool_date)
         return []
 
     pools_list = cluster_orders(

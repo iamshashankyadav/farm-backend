@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "reservation.rejected",
+  "title": "reservation.rejected",
+  "description": "Producer: land. The farmer rejected a pending request.",
+  "type": "object",
+  "required": [
+    "reservationId",
+    "customerId",
+    "farmerId",
+    "cropId"
+  ],
+  "properties": {
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

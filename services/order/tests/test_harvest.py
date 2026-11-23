@@ -1,5 +1,5 @@
-"""Harvest orders (issue #24): deposits, the order created on a quality pass, DELIVERY or BUYBACK,
-balance on completion, refunds."""
+"""Harvest orders (issue #24): deposits, the order created when the harvest is ready, DELIVERY or
+BUYBACK, balance on completion, refunds. There is no quality gate."""
 
 from datetime import date, timedelta
 from decimal import Decimal
@@ -12,6 +12,7 @@ from farm_common.auth import Role
 from farm_common.events import Event
 from order_service import consumers
 from order_service.db import PaymentRow
+from order_service.deps import get_payment_gateway
 from order_service.events import OrderEventPayload, PaymentSucceededPayload
 from order_service.main import app
 from order_service.payments import MockPaymentGateway
@@ -58,41 +59,26 @@ async def pay_deposit(api, amount=200, reservation=RESERVATION):
     )
 
 
-async def harvest_ready(api, reservation=RESERVATION) -> None:
-    await deliver(
-        api,
-        "harvest.ready",
-        reservationId=str(reservation),
-        farmerId=str(FARMER_A),
-        customerId=str(CUSTOMER),
-        cropId="tomato",
-        expectedQtyKg=100,
-        plotCentroid=PLOT,
-    )
+async def harvest_ready(api, weight=90, reservation=RESERVATION, **extra) -> Event:
+    payload = {
+        "reservationId": str(reservation),
+        "farmerId": str(FARMER_A),
+        "customerId": str(CUSTOMER),
+        "cropId": "tomato",
+        "expectedQtyKg": 100,
+        "plotCentroid": PLOT,
+        **extra,
+    }
+    if weight is not None:
+        payload["harvestedQtyKg"] = weight
+    return await deliver(api, "harvest.ready", **payload)
 
 
-async def graded(
-    api, result="PASS", grade="A", weight=90, resolution=None, reservation=RESERVATION
-):
-    return await deliver(
-        api,
-        "quality.graded",
-        inspectionId=str(uuid4()),
-        subjectType="HARVEST",
-        subjectId=str(reservation),
-        grade=grade,
-        result=result,
-        resolution=resolution,
-        weightKg=weight,
-    )
-
-
-async def graded_harvest_order(api, **graded_kwargs) -> dict:
-    """Accepted, deposit paid, harvest ready and graded: returns the harvest order."""
+async def harvest_order(api, weight=90) -> dict:
+    """Accepted, deposit paid and the harvest marked ready: returns the harvest order."""
     await accept(api)
     assert (await pay_deposit(api)).json()["status"] == "SUCCEEDED"
-    await harvest_ready(api)
-    await graded(api, **graded_kwargs)
+    await harvest_ready(api, weight=weight)
     return await only_order(api)
 
 
@@ -252,8 +238,8 @@ async def test_webhook_failure_and_unknown_or_full_intents(api):
 # --- the harvest order -------------------------------------------------------------------------
 
 
-async def test_quality_pass_creates_the_harvest_order(api):
-    order = await graded_harvest_order(api)
+async def test_harvest_ready_creates_the_harvest_order(api):
+    order = await harvest_order(api)
 
     assert order["orderType"] == "HARVEST"
     assert order["status"] == "PLACED"
@@ -263,13 +249,14 @@ async def test_quality_pass_creates_the_harvest_order(api):
     assert order["deliveryAddress"] is None
     (item,) = order["items"]
     assert item["name"] == "Harvest: Tomato"
-    assert item["qty"] == 90  # the graded weight
+    assert item["qty"] == 90  # the harvested weight
     assert item["lineTotal"] == 900  # 10 rupees a kg, as agreed in the reservation
     assert item["listingId"] is None
     assert item["pickupLocation"] == PLOT
     assert order["total"] == 900
     assert order["balanceDue"] == 700  # minus the 200 deposit
     assert [p["kind"] for p in order["payments"]] == ["DEPOSIT"]
+    assert "Choose delivery or buy-back" in order["events"][0]["note"]
     (placed,) = await api.outbox("order.placed")
     payload = OrderEventPayload.model_validate(placed.payload)
     assert payload.order_type == "HARVEST"
@@ -278,8 +265,15 @@ async def test_quality_pass_creates_the_harvest_order(api):
     assert payload.delivery_address is None
 
 
+async def test_without_a_harvested_weight_the_expected_one_is_used(api):
+    order = await harvest_order(api, weight=None)
+
+    assert order["items"][0]["qty"] == 100
+    assert order["total"] == 1000
+
+
 async def test_the_farmer_sees_the_harvest_order(api):
-    await graded_harvest_order(api)
+    await harvest_order(api)
 
     api.login(user(FARMER_A, Role.FARMER))
     listed = (await api.http.get("/orders", params={"role": "farmer"})).json()["items"]
@@ -287,52 +281,35 @@ async def test_the_farmer_sees_the_harvest_order(api):
     assert [o["orderType"] for o in listed] == ["HARVEST"]
 
 
-async def test_the_same_quality_result_twice_makes_one_order(api):
+async def test_the_same_harvest_twice_makes_one_order(api):
     await accept(api)
     await pay_deposit(api)
-    await harvest_ready(api)
-    event = await graded(api)
-    await consumers.handle_event(api.session_factory, event, SETTINGS)
-    await graded(api)  # a different event for the same harvest
+    event = await harvest_ready(api)
+    await consumers.handle_event(api.session_factory, event, SETTINGS)  # redelivered
+    await harvest_ready(api)  # a different event for the same harvest
 
     assert len((await api.http.get("/orders")).json()["items"]) == 1
     assert len(await api.outbox("order.placed")) == 1
 
 
-async def test_a_failed_harvest_makes_no_order_until_a_lower_grade_is_accepted(api):
-    await accept(api)
-    await pay_deposit(api)
-    await harvest_ready(api)
-
-    await graded(api, result="FAIL", grade="C", resolution="REHARVEST")
-    assert (await api.http.get("/orders")).json()["items"] == []
-
-    await graded(api, result="FAIL", grade="B", resolution="ACCEPT_LOWER_GRADE")
-    order = await only_order(api)
-    assert order["total"] == 810  # grade B sells for 90% of 900
-    assert "lower grade" in order["events"][0]["note"]
-
-
 async def test_without_a_price_in_the_reservation_it_is_estimated_from_the_deposit(api):
     await accept(api, total=None, deposit=200)  # 200 is 20% of the crop, so the crop is 1000
     await pay_deposit(api)
-    await harvest_ready(api)
-    await graded(api, weight=100)
+    await harvest_ready(api, weight=100)
 
     assert (await only_order(api))["total"] == 1000
 
 
-async def test_events_in_the_wrong_order_are_tolerated(api):
-    await harvest_ready(api)  # before reservation.accepted
-    await accept(api)
-    await pay_deposit(api)
-    await graded(api)
+async def test_the_price_in_harvest_ready_is_used_when_events_cross(api):
+    await harvest_ready(api, total=1000)  # before reservation.accepted
 
-    assert (await only_order(api))["items"][0]["pickupLocation"] == PLOT
+    order = await only_order(api)
+    assert order["total"] == 900
+    assert order["items"][0]["pickupLocation"] == PLOT
 
 
-async def test_a_graded_harvest_of_an_unknown_reservation_is_ignored(api):
-    await graded(api)
+async def test_a_harvest_without_customer_or_farmer_is_ignored(api):
+    await deliver(api, "harvest.ready", reservationId=str(RESERVATION), cropId="tomato")
 
     assert (await api.http.get("/orders")).json()["items"] == []
 
@@ -341,7 +318,7 @@ async def test_a_graded_harvest_of_an_unknown_reservation_is_ignored(api):
 
 
 async def test_delivery_sends_the_order_to_logistics(api):
-    await graded_harvest_order(api)
+    await harvest_order(api)
     tomorrow = (date.today() + timedelta(days=2)).isoformat()
 
     response = await choose(api, "DELIVERY", deliveryAddress=ADDRESS, deliveryDate=tomorrow)
@@ -358,7 +335,6 @@ async def test_delivery_sends_the_order_to_logistics(api):
         "PLACED",
         "CONFIRMED",
         "PACKED",
-        "QC_PASSED",
         "READY_FOR_DISPATCH",
     ]
     (ready,) = await api.outbox("order.ready_for_dispatch")
@@ -366,12 +342,12 @@ async def test_delivery_sends_the_order_to_logistics(api):
     assert payload.delivery_address is not None
     assert payload.items[0].pickup_location.lng == 75.9
     assert payload.delivery_date.isoformat() == tomorrow
-    # quality must not open a second inspection for a harvest that is already graded
+    # the farmer harvested already: no packing event for a harvest order
     assert await api.outbox("order.packed") == []
 
 
 async def test_delivery_needs_an_address_and_repeating_the_choice_is_safe(api):
-    await graded_harvest_order(api)
+    await harvest_order(api)
 
     missing = await choose(api, "DELIVERY")
     first = await choose(api, "DELIVERY", deliveryAddress=ADDRESS)
@@ -386,7 +362,7 @@ async def test_delivery_needs_an_address_and_repeating_the_choice_is_safe(api):
 
 
 async def test_delivery_date_defaults_to_tomorrow_and_must_be_valid(api):
-    await graded_harvest_order(api)
+    await harvest_order(api)
     past = (date.today() - timedelta(days=3)).isoformat()
 
     bad = await choose(api, "DELIVERY", deliveryAddress=ADDRESS, deliveryDate=past)
@@ -400,7 +376,7 @@ async def test_delivery_date_defaults_to_tomorrow_and_must_be_valid(api):
     assert good.json()["deliveryDate"] == tomorrow.isoformat()
 
 
-async def test_choice_needs_a_graded_harvest_of_my_own_reservation(api):
+async def test_choice_needs_a_ready_harvest_of_my_own_reservation(api):
     await accept(api)
 
     too_early = await choose(api, "BUYBACK")
@@ -409,7 +385,6 @@ async def test_choice_needs_a_graded_harvest_of_my_own_reservation(api):
 
     await pay_deposit(api)
     await harvest_ready(api)
-    await graded(api)
     stranger = await _as(api, OTHER_CUSTOMER, lambda a: choose(a, "BUYBACK"))
     assert stranger.status_code == 404
     unknown = await api.http.post(
@@ -422,7 +397,7 @@ async def test_choice_needs_a_graded_harvest_of_my_own_reservation(api):
 
 
 async def delivered(api, gateway=None) -> dict:
-    order = await graded_harvest_order(api)
+    order = await harvest_order(api)
     await choose(api, "DELIVERY", deliveryAddress=ADDRESS)
     await deliver(api, "delivery.completed", gateway, orderId=order["id"])
     return (await api.http.get(f"/orders/{order['id']}")).json()
@@ -462,8 +437,8 @@ async def test_a_declined_balance_keeps_the_order_delivered(api):
     assert await api.outbox("order.completed") == []
 
 
-async def test_a_deposit_above_the_lower_grade_price_is_refunded(api):
-    order = await graded_harvest_order(api, weight=10)  # 10 kg at 10 rupees = 100 < 200 deposit
+async def test_a_deposit_above_the_price_of_a_small_harvest_is_refunded(api):
+    order = await harvest_order(api, weight=10)  # 10 kg at 10 rupees = 100 < 200 deposit
     await choose(api, "DELIVERY", deliveryAddress=ADDRESS)  # + 20 delivery = 120
     await deliver(api, "delivery.completed", orderId=order["id"])
 
@@ -480,8 +455,8 @@ async def test_a_deposit_above_the_lower_grade_price_is_refunded(api):
 # --- buy-back ----------------------------------------------------------------------------------
 
 
-async def test_buyback_credits_the_customer_and_completes_the_order(api):
-    await graded_harvest_order(api)
+async def test_buyback_charges_the_balance_then_credits_the_customer(api):
+    await harvest_order(api)
 
     response = await choose(api, "BUYBACK")
 
@@ -491,22 +466,41 @@ async def test_buyback_credits_the_customer_and_completes_the_order(api):
     assert order["harvestOption"] == "BUYBACK"
     assert order["deliveryFee"] == 0
     assert order["balanceDue"] == 0
-    assert [(p["kind"], p["amount"], p["status"]) for p in order["payments"]] == [
+    assert sorted((p["kind"], p["amount"], p["status"]) for p in order["payments"]) == [
+        ("BALANCE", 700, "SUCCEEDED"),  # the customer owns the 900 harvest: 200 deposit + 700
         ("DEPOSIT", 200, "SUCCEEDED"),
-        ("REFUND", 810, "SUCCEEDED"),  # 90% of the 900 harvest
+        ("PAYOUT", 90, "SUCCEEDED"),  # the farmer keeps 10% for selling it
+        ("REFUND", 810, "SUCCEEDED"),  # 90% of the 900 harvest, credited to the customer
     ]
     assert "credited" in order["events"][-1]["note"]
     assert len(await api.outbox("order.completed")) == 1
-    # logistics has nothing to do: no pooling, no inspection
+    # logistics has nothing to do
     assert await api.outbox("order.ready_for_dispatch") == []
     assert await api.outbox("order.packed") == []
+
+
+async def test_a_declined_buyback_balance_leaves_the_choice_open(api):
+    await harvest_order(api)
+    declined = MockPaymentGateway(Decimal("700.00"))
+    app.dependency_overrides[get_payment_gateway] = lambda: declined
+    try:
+        response = await choose(api, "BUYBACK")
+    finally:
+        del app.dependency_overrides[get_payment_gateway]
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "BALANCE_PAYMENT_FAILED"
+    order = await only_order(api)
+    assert order["status"] == "PLACED"
+    assert order["harvestOption"] is None
+    assert (await choose(api, "DELIVERY", deliveryAddress=ADDRESS)).status_code == 200
 
 
 # --- refunds -----------------------------------------------------------------------------------
 
 
 async def test_cancelling_a_harvest_order_refunds_the_deposit(api):
-    order = await graded_harvest_order(api)
+    order = await harvest_order(api)
 
     response = await api.http.post(f"/orders/{order['id']}/cancel", json={"reason": "Changed mind"})
 
@@ -523,7 +517,7 @@ async def test_cancelling_a_harvest_order_refunds_the_deposit(api):
 
 
 async def test_a_harvest_order_can_not_be_cancelled_once_delivery_is_chosen(api):
-    order = await graded_harvest_order(api)
+    order = await harvest_order(api)
     await choose(api, "DELIVERY", deliveryAddress=ADDRESS)
 
     response = await api.http.post(f"/orders/{order['id']}/cancel")
@@ -538,7 +532,7 @@ async def test_a_cancelled_reservation_gets_its_deposit_back(api):
 
     await deliver(api, "reservation.cancelled", reservationId=str(RESERVATION))
     await deliver(api, "reservation.cancelled", reservationId=str(RESERVATION))  # a second event
-    await graded(api)  # too late: the reservation is gone
+    await harvest_ready(api)  # too late: the reservation is gone
 
     async with api.session_factory() as session:
         refunds = (
@@ -551,7 +545,7 @@ async def test_a_cancelled_reservation_gets_its_deposit_back(api):
 
 
 async def test_a_farmer_cannot_pack_a_harvest_order(api):
-    order = await graded_harvest_order(api)
+    order = await harvest_order(api)
 
     api.login(user(FARMER_A, Role.FARMER))
     response = await api.http.post(f"/orders/{order['id']}/pack")

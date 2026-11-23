@@ -36,7 +36,7 @@ GeoJSON `FeatureCollection` (HLD section 13). Other lists use `?cursor&limit` an
 | GET | `/farms/{id}/listings` | Public | A farm's active listings |
 | POST | `/listings` | Farmer | Publish produce (publishes `listing.published`) |
 | GET | `/listings/mine?status&farm_id` | Farmer | My listings in every status |
-| GET | `/listings/search?lat&lng&radius_km&crop&min_price&max_price&grade&organic&sort` | Public | Produce near a point: GeoJSON features with `distanceM` |
+| GET | `/listings/search?lat&lng&radius_km&crop&min_price&max_price&organic&sort` | Public | Produce near a point: GeoJSON features with `distanceM` |
 | GET, PATCH, DELETE | `/listings/{id}` | Public / owner | Details, edit price/stock/pause (`listing.updated`), archive |
 
 Internal (Docker network only, never through the gateway):
@@ -48,7 +48,7 @@ Internal (Docker network only, never through the gateway):
 | GET | `/internal/geo/{farm\|listing}/{id}` | media | Point and boundary, for photo geo-verification |
 
 Events: publishes `listing.published`, `listing.updated` (schemas in `contracts/events/`); consumes
-`order.cancelled` (releases stock) and `quality.graded` (sets the listing grade).
+`order.cancelled` (releases stock) and `order.rated` (adds the score to the farm's rating). Only farmers an admin has verified (the `fv` claim of their token) may open a farm or list produce: others get 403 `FARMER_NOT_VERIFIED`.
 
 Regenerate the contract after changing routes or models:
 

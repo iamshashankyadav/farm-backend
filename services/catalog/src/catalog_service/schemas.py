@@ -27,14 +27,6 @@ class Unit(StrEnum):
     LITRE = "litre"
 
 
-class Grade(StrEnum):
-    """Set by the quality service (quality.graded); A is best."""
-
-    A = "A"
-    B = "B"
-    C = "C"
-
-
 class ListingStatus(StrEnum):
     ACTIVE = "ACTIVE"  # visible in search
     PAUSED = "PAUSED"  # hidden by the farmer
@@ -159,7 +151,6 @@ class ListingFields(ApiModel):
     unit: Unit
     price_per_unit: float
     harvest_date: date
-    grade: Grade | None = Field(description="Null until the quality service grades a batch")
     is_organic: bool
     status: ListingStatus
     media_ids: list[UUID]
@@ -225,7 +216,6 @@ class ReservedItem(ApiModel):
     unit: Unit
     qty: float
     unit_price: float
-    grade: Grade | None
     pickup_location: GeoPoint
 
 

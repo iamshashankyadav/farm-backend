@@ -36,7 +36,6 @@ RabbitMQ for events, Redis, MinIO (S3) for photos, Traefik as the API gateway, u
 | `catalog` | Team 2 | V1 farms and produce listings, geo search, stock reserve/release |
 | `land` | Team 2 | V2 plots, seasons, reservations, crop updates, harvest flow |
 | `media` | Team 2 | Signed photo uploads, EXIF/GPS verification, thumbnails |
-| `quality` | Team 2 | Inspections and grades for produce batches and harvests |
 | `order` | Team 1 | Cart, checkout saga, V1 and V2 orders, mock payments |
 | `logistics` | Team 1 | Delivery pooling, routes, partner app API, tracking, proof of delivery |
 | `notification` | Team 1 | Push, email and in-app inbox, driven by events |
@@ -97,7 +96,6 @@ uv run mypy libs/common/src services/*/src
 | catalog | `catalog_service` | 8002 |
 | land | `land_service` | 8003 |
 | media | `media_service` | 8004 |
-| quality | `quality_service` | 8005 |
 | order | `order_service` | 8006 |
 | logistics | `logistics_service` | 8007 |
 | notification | `notification_service` | 8008 |

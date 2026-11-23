@@ -26,13 +26,15 @@ class Role(StrEnum):
     FARMER = "farmer"
     CUSTOMER = "customer"
     DELIVERY = "delivery"
-    INSPECTOR = "inspector"
     ADMIN = "admin"
 
 
 class CurrentUser(BaseModel):
     id: str
     roles: list[Role]
+    # True once an admin verified this farmer (claim `fv` of the access token). Only verified
+    # farmers may sell produce or offer land; see require_verified_farmer().
+    farmer_verified: bool = False
 
     def has_any(self, *roles: Role) -> bool:
         return any(role in self.roles for role in roles)
@@ -68,7 +70,11 @@ def decode_access_token(token: str, settings: ServiceSettings) -> CurrentUser:
     if claims.get("type") != "access":
         raise Unauthorized("An access token is required", code="INVALID_TOKEN")
     try:
-        return CurrentUser(id=str(claims["sub"]), roles=claims.get("roles", []))
+        return CurrentUser(
+            id=str(claims["sub"]),
+            roles=claims.get("roles", []),
+            farmer_verified=bool(claims.get("fv", False)),
+        )
     except ValueError as exc:
         raise Unauthorized("Invalid token", code="INVALID_TOKEN") from exc
 
@@ -91,6 +97,25 @@ def require_roles(*roles: Role) -> Callable[..., Coroutine[Any, Any, CurrentUser
     async def dependency(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
         if not user.has_any(*roles):
             raise Forbidden(f"Requires one of the roles: {', '.join(roles)}")
+        return user
+
+    return dependency
+
+
+def require_verified_farmer() -> Callable[..., Coroutine[Any, Any, CurrentUser]]:
+    """A farmer an admin has verified (or an admin). An unverified farmer gets 403
+    FARMER_NOT_VERIFIED, so nobody sells produce or offers land before the admin checks them."""
+
+    async def dependency(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        if user.has_any(Role.ADMIN):
+            return user
+        if not user.has_any(Role.FARMER):
+            raise Forbidden(f"Requires one of the roles: {Role.FARMER}")
+        if not user.farmer_verified:
+            raise Forbidden(
+                "Your farmer account is waiting for an admin to verify it",
+                code="FARMER_NOT_VERIFIED",
+            )
         return user
 
     return dependency

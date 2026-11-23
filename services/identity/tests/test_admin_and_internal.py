@@ -1,3 +1,6 @@
+from farm_common.auth import decode_access_token
+
+
 async def test_admin_routes_need_admin_role(api, client):
     await api.register()
     tokens = await api.login()
@@ -46,19 +49,45 @@ async def test_verify_farmer_publishes_event(api, client, make_admin, outbox_typ
     assert (await outbox_types())[-1] == "farmer.verified"
 
 
-async def test_admin_grants_inspector_and_ends_sessions(api, client, make_admin):
+async def test_admin_grants_admin_and_ends_sessions(api, client, make_admin):
     await make_admin()
     user = (await api.register()).json()
     user_tokens = await api.login()
     admin = await api.login("+919000000001")
 
     response = await client.put(
-        f"/users/{user['id']}/roles", headers=api.bearer(admin), json={"roles": ["inspector"]}
+        f"/users/{user['id']}/roles", headers=api.bearer(admin), json={"roles": ["admin"]}
     )
     old_refresh = await client.post("/refresh", json={"refreshToken": user_tokens["refreshToken"]})
 
-    assert response.json()["roles"] == ["inspector"]
+    assert response.json()["roles"] == ["admin"]
     assert old_refresh.status_code == 401
+
+
+async def test_inspector_is_no_longer_a_role(api, client, make_admin):
+    await make_admin()
+    user = (await api.register()).json()
+    admin = await api.login("+919000000001")
+
+    response = await client.put(
+        f"/users/{user['id']}/roles", headers=api.bearer(admin), json={"roles": ["inspector"]}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_access_token_says_whether_the_farmer_is_verified(
+    api, client, make_admin, settings
+):
+    await make_admin()
+    farmer = (await api.register(roles=["farmer"])).json()
+    before = decode_access_token((await api.login())["accessToken"], settings)
+    admin = await api.login("+919000000001")
+    await client.post(f"/users/{farmer['id']}/verify-farmer", headers=api.bearer(admin))
+    after = decode_access_token((await api.login())["accessToken"], settings)
+
+    assert before.farmer_verified is False
+    assert after.farmer_verified is True
 
 
 async def test_forward_auth(api, client):

@@ -15,9 +15,51 @@ verified end to end.
 | 4 | Web redesign, direction C "Ledger" | Done and merged (farm-web #28 to #31); checked at 390 and 1440 px for every role |
 | 5 | Mobile redesign: Kotlin app, handed to the Android session | Brief and copy-paste prompt written ([android-prompt.md](android-prompt.md)), direction C tokens included |
 | 6 | End-to-end tests (Playwright, API flows), screenshots, VM deploy, demo script | Done except the VM deploy: `pnpm e2e` (31 tests, web #30), `farm_seed.journeys` V1 and V2 (backend #68, closes #22), [DEMO-SCRIPT.md](DEMO-SCRIPT.md). All merged on 2026-11-22; VM deploy still to do |
-| 7 | New features | P1 done and merged. P2 done in code (backend #74, web #34, both open): farm ratings, low-stock alerts with auto sold-out, Hindi and English, inspector on a phone (the website's inspector screens were then removed with the role). P3 open |
+| 7 | New features | P1 and P2 merged: farm ratings, low-stock alerts with auto sold-out, Hindi and English. P3 open |
+| 8 | End-to-end audit (2026-11-23) | Quality gate removed, 15 defects fixed, VM seed data removed (see below). Android follow-ups in [android-handoff.md](android-handoff.md) section 12 |
 
-## Fixed so far
+## End-to-end audit, 2026-11-23
+
+Every flow was replayed on an empty stack (probe scripts, `farm_seed.journeys`, a new website journey
+`e2e/journey.spec.ts` that needs no demo data). Decisions taken with the team lead:
+
+- **The quality gate is removed** (inspections, inspector role, listing grades, the quality service).
+  Packing makes an order ready for dispatch; a harvest becomes an order when the farmer records its weight.
+  Quality is judged by the customer's rating after delivery (the admin dashboard shows the average).
+- **The team VM holds no demo data**: the seeded people and everything linked to them were deleted
+  (backups in `~/backups` on the VM); the admin and the accounts people registered themselves were kept.
+
+Defects found and fixed (each has a test):
+
+| Area | Defect | Fix |
+| --- | --- | --- |
+| Identity, catalog, land | Unverified farmers could open farms, list produce and offer land | Token claim `fv`; 403 `FARMER_NOT_VERIFIED`; the website hides the forms until verified |
+| Logistics | The delivery OTP was never generated, so any code was accepted; the customer never saw a code | 4-digit code per drop, shown only to the order's customer, hidden from partners and admins, checked on delivery |
+| Logistics | Any signed-in user could track any order (partner name, phone, live location) | Tracking answers 404 to anyone but the order's customer or an admin |
+| Logistics | The partner had no phone number for the customer | The dispatch feed carries the contact phone |
+| Logistics | Running pooling twice put the same order on two routes | Runs are serialised (advisory lock) and orders already on a route are skipped |
+| Logistics | Vehicle capacity was 50 kg (HLD: 500 kg); a quintal counted as 1 kg | 500 kg; weights converted per unit |
+| Logistics | The 02:00 IST nightly job pooled the UTC date, i.e. yesterday | India dates for the job and the route defaults |
+| Logistics | A drop could be delivered before its pickup; a delivered stop could be skipped | 409 `PICKUP_FIRST`, 409 `STOP_DONE` |
+| Land | Overlapping seasons let the same land to two customers (the demo seed itself did this) | Exclusion constraint + 409 `SEASON_OVERLAP` |
+| Land | Ended seasons were offered in search; a farmer could reserve their own plot | Hidden from search; 422 `OWN_PLOT` |
+| Land | An expired request kept the season for up to a minute and nobody was told | Expired at once on a new request; `reservation.expired` tells both sides |
+| Land | Reservations never reached COMPLETED after delivery or buy-back | Land follows the harvest order (FULFILLING, COMPLETED, CANCELLED) |
+| Order | Buy-back credited 90 % of the harvest while only the 20 % deposit was paid | The balance is charged first; the farmer keeps 10 % as a payout |
+| Notification | No notice for new, rejected, cancelled or expired land requests, deposits paid, crop updates or verification; a harvest told the farmer "New order to pack" | Events from land and identity, notices to the right side |
+| Website | The harvest choice was shown at HARVEST_READY (when the API refuses it) and hidden at FULFILLING (when it is due) | Shown while the harvest order waits for a choice, with the amounts |
+
+Still open after the audit:
+
+- Android: the screens listed in [android-handoff.md](android-handoff.md) section 12 (rail stage "Graded",
+  grade filter, harvest texts). The app works against the new backend; those texts are out of date.
+- Gateway: tokens are checked in each service, not by Traefik forward-auth (identity already serves
+  `/internal/auth/verify`). Equivalent security, one less hop; switch if the course requires it.
+- Pooling clusters in Python (haversine DBSCAN) rather than `ST_ClusterDBSCAN`; fine at this size.
+- A skipped drop stays on its route; there is no re-pooling of skipped orders yet.
+- Crop updates show the day they were posted, not the photo's capture time.
+
+## Fixed earlier
 
 - **Photos were silently lost** (backend #64): the media and logistics workers shared arq's default queue,
   so the logistics worker took about half of the media jobs and dropped them. 11 of 40 test uploads stuck,
@@ -30,11 +72,11 @@ verified end to end.
 ## Still open
 
 - Reserving an ended season: fixed in backend #69, pooling plural fixed in web #31.
-- Reservation requests send no notification to the farmer (the land service emits no event for a new request).
+- ~~Reservation requests send no notification to the farmer~~ fixed in the 2026-11-23 audit (`reservation.requested`).
 - The admin dashboard computes its numbers in the browser from the order list; add a stats endpoint if orders grow into the thousands.
 - Running `farm_seed.journeys` on the demo stack adds "Journey" people and plots; reseed to clear them before presenting.
 - Crop updates show the day they were created, not the photo's capture time.
-- Hindi: the website covers the shell, sign-in, home, notifications, farmer listings, orders and earnings, and the inspector; plots, crop updates, reservation forms, customer land search and the admin page bodies still read English. Server text (notification bodies, errors) is English; sending a language with the request would fix that.
+- Hindi: the website covers the shell, sign-in, home, notifications, farmer listings, orders and earnings; plots, crop updates, reservation forms, customer land search and the admin page bodies still read English. Server text (notification bodies, errors) is English; sending a language with the request would fix that.
 - Low-stock lines are one number per unit in `catalog_service/service.py` (`LOW_STOCK_THRESHOLD`); a per-listing threshold needs a column.
 - Farm ratings only count ratings made after the catalog migration `0002_farm_ratings`; older ratings stay in the order service.
 - Mobile apps: fake-data fallbacks, mock logins, fabricated reservations (android-handoff.md section 5).
@@ -92,10 +134,10 @@ Closes backend #22 and #26.
 | --- | --- |
 | P1 | Farmer earnings ledger page (payouts endpoint exists since #62) |
 | P1 | Notification inbox with unread badge on web |
-| P1 | Admin dashboard with real numbers: orders per day, sales, inspection pass rate, km saved by pooling |
+| P1 | Admin dashboard with real numbers: orders per day, sales, customer rating (was inspection pass rate), km saved by pooling |
 | P1 | Admin orders view with dispute and refund action |
 | P2 | Farm ratings shown on listings |
 | P2 | Low-stock alert, auto-pause listing at zero stock |
 | P2 | Hindi and English |
-| P2 | Inspector screens usable on a phone browser (built, then dropped: the website no longer has an inspector role) |
+| P2 | Inspector screens usable on a phone browser (built, then dropped with the quality gate) |
 | P3 | Receipts and agreement PDFs, reorder and favourite farms, partner earnings, weather on the crop timeline |

@@ -74,45 +74,128 @@ def test_map_reservation_accepted_event():
     assert "₹300.00" in body
 
 
-def test_map_harvest_ready_event():
-    cust_id = uuid4()
+def test_a_harvest_order_asks_the_customer_to_choose_and_spares_the_farmer():
+    cust_id, farmer_id = uuid4(), uuid4()
     event = Event(
-        type="harvest.ready",
+        type="order.placed",
+        producer="order",
+        payload={
+            "orderId": str(uuid4()),
+            "customerId": str(cust_id),
+            "farmOwnerId": str(farmer_id),
+            "orderType": "HARVEST",
+            "reservationId": str(uuid4()),
+            "items": [{"name": "Harvest: Wheat", "qty": 92.0}],
+            "total": 2760.0,
+        },
+    )
+
+    user_id, ntype, title, body, payload = map_event_to_notification(event)
+
+    assert (user_id, ntype, title) == (
+        cust_id,
+        NotificationType.HARVEST_READY,
+        "Your harvest is ready",
+    )
+    assert "Wheat has been harvested (92 kg)" in body and "delivery or buy-back" in body
+    assert payload["reservationId"] == event.payload["reservationId"]
+    assert map_event_to_farmer_notification(event) is None  # nothing for the farmer to pack
+
+
+def test_packing_a_produce_order_sends_one_message():
+    base = {"orderId": str(uuid4()), "customerId": str(uuid4()), "orderType": "PRODUCE"}
+
+    packed = map_event_to_notification(Event(type="order.packed", producer="order", payload=base))
+    ready = map_event_to_notification(
+        Event(type="order.ready_for_dispatch", producer="order", payload=base)
+    )
+
+    assert packed is not None and "waiting for a delivery partner" in packed[3]
+    assert ready is None
+
+
+def land(event_type: str, **extra) -> Event:
+    return Event(
+        type=event_type,
         producer="land",
         payload={
-            "customerId": str(cust_id),
-            "cropId": "organic-wheat",
             "reservationId": str(uuid4()),
+            "customerId": str(CUSTOMER),
+            "farmerId": str(FARMER),
+            "cropId": "green-chilli",
+            **extra,
         },
     )
-    mapped = map_event_to_notification(event)
-    assert mapped is not None
-    user_id, ntype, title, body, _ = mapped
-    assert user_id == cust_id
-    assert ntype == NotificationType.HARVEST_READY
-    assert "organic-wheat" in body
 
 
-def test_map_quality_graded_event():
-    cust_id = uuid4()
+CUSTOMER, FARMER = uuid4(), uuid4()
+
+
+def test_land_requests_reach_the_right_side():
+    requested = land(
+        "reservation.requested", plotTitle="River plot", season="Rabi", expectedQtyKg=400
+    )
+    rejected = land("reservation.rejected")
+    activated = land("reservation.activated")
+    by_customer = land("reservation.cancelled", cancelledBy="customer")
+    by_farmer = land("reservation.cancelled", cancelledBy="farmer")
+    expired = land("reservation.expired")
+
+    to_farmer = map_event_to_farmer_notification(requested)
+    assert to_farmer[0] == FARMER and to_farmer[1] == NotificationType.RESERVATION_REQUESTED
+    assert "green chilli (about 400 kg) on River plot, Rabi season" in to_farmer[3]
+    assert map_event_to_notification(requested) is None
+
+    assert map_event_to_notification(rejected)[:2] == (
+        CUSTOMER,
+        NotificationType.RESERVATION_REJECTED,
+    )
+    assert map_event_to_farmer_notification(activated)[:2] == (
+        FARMER,
+        NotificationType.RESERVATION_ACTIVATED,
+    )
+    assert map_event_to_farmer_notification(by_customer)[0] == FARMER
+    assert map_event_to_notification(by_customer) is None
+    assert map_event_to_notification(by_farmer)[0] == CUSTOMER
+    assert map_event_to_farmer_notification(by_farmer) is None
+    assert map_event_to_notification(expired)[0] == CUSTOMER  # both sides hear about it
+    assert map_event_to_farmer_notification(expired)[0] == FARMER
+
+
+def test_a_crop_update_reaches_the_customer():
+    event = land("crop.updated", stage="FLOWERING", note="Buds everywhere.", photoCount=2)
+
+    user_id, ntype, title, body, payload = map_event_to_notification(event)
+
+    assert (user_id, ntype) == (CUSTOMER, NotificationType.CROP_UPDATE)
+    assert title == "Your green chilli: flowering"
+    assert body == "The farmer posted a crop update (2 photos). Buds everywhere."
+    assert payload["stage"] == "FLOWERING"
+
+
+def test_a_verified_farmer_is_told():
+    farmer = uuid4()
+    event = Event(type="farmer.verified", producer="identity", payload={"userId": str(farmer)})
+
+    user_id, ntype, title, _, _ = map_event_to_farmer_notification(event)
+
+    assert (user_id, ntype, title) == (farmer, NotificationType.FARMER_VERIFIED, "You are verified")
+
+
+def test_a_buyback_tells_the_farmer_the_produce_is_theirs():
     event = Event(
-        type="quality.graded",
-        producer="quality",
+        type="order.completed",
+        producer="order",
         payload={
-            "customerId": str(cust_id),
-            "subjectType": "ORDER",
-            "grade": "A",
-            "result": "PASS",
-            "inspectionId": str(uuid4()),
+            "orderId": str(uuid4()),
+            "customerId": str(uuid4()),
+            "farmOwnerId": str(FARMER),
+            "orderType": "HARVEST",
+            "harvestOption": "BUYBACK",
         },
     )
-    mapped = map_event_to_notification(event)
-    assert mapped is not None
-    user_id, ntype, title, body, _ = mapped
-    assert user_id == cust_id
-    assert ntype == NotificationType.ORDER_QC_PASSED
-    assert "Passed" in title
-    assert "Grade A" in body
+
+    assert map_event_to_farmer_notification(event)[2] == "Harvest bought back"
 
 
 def test_map_unknown_or_missing_customer_returns_none():

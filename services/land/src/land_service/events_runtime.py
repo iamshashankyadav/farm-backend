@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from sqlalchemy import update
 
-from farm_common.events import RabbitEventBus
-from farm_common.outbox import run_relay
+from farm_common.events import Event, RabbitEventBus
+from farm_common.outbox import add_event, run_relay
 from land_service.consumers import make_handler
 from land_service.database import get_session_factory
 from land_service.db import OutboxEvent, Reservation, now
@@ -16,13 +16,36 @@ from land_service.settings import get_land_settings
 
 
 async def expire_pending_reservations(session_factory) -> int:
+    """Requests the farmer did not answer within 48 hours become EXPIRED; both sides are told."""
     async with session_factory() as session, session.begin():
-        result = await session.execute(
-            update(Reservation)
-            .where(Reservation.status == "PENDING", Reservation.expires_at <= now())
-            .values(status="EXPIRED", updated_at=now())
+        expired = (
+            (
+                await session.execute(
+                    update(Reservation)
+                    .where(Reservation.status == "PENDING", Reservation.expires_at <= now())
+                    .values(status="EXPIRED", updated_at=now())
+                    .returning(Reservation)
+                )
+            )
+            .scalars()
+            .all()
         )
-        return result.rowcount or 0
+        for row in expired:
+            add_event(
+                session,
+                OutboxEvent,
+                Event(
+                    type="reservation.expired",
+                    producer="land",
+                    payload={
+                        "reservationId": str(row.id),
+                        "customerId": str(row.customer_id),
+                        "farmerId": str(row.farmer_id),
+                        "cropId": row.crop_id,
+                    },
+                ),
+            )
+        return len(expired)
 
 
 async def expiry_loop(session_factory) -> None:
@@ -47,7 +70,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             bus = RabbitEventBus(settings.rabbitmq_url, service_name="land")
             await bus.connect()
             await bus.subscribe(
-                ["payment.succeeded", "quality.graded"], make_handler(session_factory)
+                ["payment.succeeded", "order.placed", "order.completed", "order.cancelled"],
+                make_handler(session_factory),
             )
             relay = asyncio.create_task(run_relay(session_factory, OutboxEvent, bus))
         yield

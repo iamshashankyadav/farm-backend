@@ -1,5 +1,7 @@
 from uuid import uuid4
 
+from .conftest import token_for
+
 SQUARE = {
     "type": "Polygon",
     "coordinates": [[[81.27, 21.18], [81.29, 21.18], [81.29, 21.2], [81.27, 21.2], [81.27, 21.18]]],
@@ -40,6 +42,29 @@ async def test_farm_crud(api, client):
     assert patched.json()["boundary"] is None
 
 
+async def test_an_unverified_farmer_cannot_sell(api, client):
+    farm = await api.farm()
+    waiting = token_for(uuid4(), "farmer", verified=False)
+    listing = {
+        "farmId": farm["id"],
+        "cropId": "tomato",
+        "qtyAvailable": 5,
+        "pricePerUnit": 20,
+        "harvestDate": "2026-11-20",
+    }
+
+    new_farm = await client.post(
+        "/farms",
+        json={"name": "Waiting Farm", "district": "Durg", "location": farm["location"]},
+        headers=waiting,
+    )
+    new_listing = await client.post("/listings", json=listing, headers=waiting)
+
+    assert new_farm.status_code == 403
+    assert new_farm.json()["error"]["code"] == "FARMER_NOT_VERIFIED"
+    assert new_listing.status_code == 403
+
+
 async def test_only_owner_or_admin_edits_a_farm(api, client, make_token):
     farm = await api.farm()
     other = make_token(uuid4(), "farmer")
@@ -66,7 +91,7 @@ async def test_create_listing_publishes_event(api, outbox):
     assert listing["cropName"] == "Tomato"
     assert listing["qtyAvailable"] == 12.5
     assert listing["status"] == "ACTIVE"
-    assert listing["grade"] is None
+    assert "grade" not in listing
     assert listing["pickupLocation"] == farm["location"]
 
     events = await outbox("listing.published")
