@@ -8,7 +8,13 @@ from fastapi import Depends
 from fastapi.testclient import TestClient
 
 from farm_common.app import create_app
-from farm_common.auth import CurrentUser, Role, get_current_user, require_roles
+from farm_common.auth import (
+    CurrentUser,
+    Role,
+    get_current_user,
+    require_roles,
+    require_verified_farmer,
+)
 from farm_common.settings import ServiceSettings, get_settings
 
 
@@ -31,7 +37,14 @@ PRIVATE, PUBLIC = _key_pair()
 OTHER_PRIVATE, _ = _key_pair()
 
 
-def token(roles: list[str], *, key: str = PRIVATE, expires_in: int = 900, kind: str = "access"):
+def token(
+    roles: list[str],
+    *,
+    key: str = PRIVATE,
+    expires_in: int = 900,
+    kind: str = "access",
+    verified: bool | None = None,
+):
     now = datetime.now(UTC)
     claims = {
         "sub": "user-1",
@@ -42,6 +55,8 @@ def token(roles: list[str], *, key: str = PRIVATE, expires_in: int = 900, kind: 
         "iat": now,
         "exp": now + timedelta(seconds=expires_in),
     }
+    if verified is not None:
+        claims["fv"] = verified
     return jwt.encode(claims, key, algorithm="RS256")
 
 
@@ -57,6 +72,10 @@ def client() -> TestClient:
 
     @app.post("/listings")
     async def create_listing(user: CurrentUser = Depends(require_roles(Role.FARMER))) -> dict:
+        return {"created_by": user.id}
+
+    @app.post("/farms")
+    async def create_farm(user: CurrentUser = Depends(require_verified_farmer())) -> dict:
         return {"created_by": user.id}
 
     return TestClient(app)
@@ -78,7 +97,11 @@ def test_valid_token_returns_user(client):
     response = client.get("/me", headers=auth(token(["farmer", "customer"])))
 
     assert response.status_code == 200
-    assert response.json() == {"id": "user-1", "roles": ["farmer", "customer"]}
+    assert response.json() == {
+        "id": "user-1",
+        "roles": ["farmer", "customer"],
+        "farmer_verified": False,
+    }
 
 
 def test_role_allowed(client):
@@ -110,3 +133,21 @@ def test_rejected_tokens(client, bad_token, code):
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == code
+
+
+@pytest.mark.parametrize(
+    ("roles", "verified", "status", "code"),
+    [
+        (["farmer"], True, 200, None),
+        (["farmer"], False, 403, "FARMER_NOT_VERIFIED"),
+        (["farmer"], None, 403, "FARMER_NOT_VERIFIED"),  # a token from before the claim existed
+        (["customer"], True, 403, "FORBIDDEN"),
+        (["admin"], None, 200, None),
+    ],
+)
+def test_only_verified_farmers_may_sell(client, roles, verified, status, code):
+    response = client.post("/farms", headers=auth(token(roles, verified=verified)))
+
+    assert response.status_code == status
+    if code:
+        assert response.json()["error"]["code"] == code

@@ -8,7 +8,6 @@ from catalog_service.geo import GeoPoint
 from catalog_service.schemas import (
     CropOut,
     FarmOut,
-    Grade,
     ListingFeature,
     ListingOut,
     ListingSearchProperties,
@@ -57,7 +56,6 @@ def listing(**overrides: object) -> ListingOut:
         "unit": Unit.KG,
         "price_per_unit": 28.0,
         "harvest_date": date(2026, 11, 14),
-        "grade": Grade.A,
         "is_organic": True,
         "status": ListingStatus.ACTIVE,
         "pickup_location": GeoPoint.at(lat=21.2665, lng=81.5107),

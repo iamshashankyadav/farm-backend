@@ -8,7 +8,7 @@ from pydantic import AfterValidator, EmailStr, Field, StringConstraints, field_v
 from farm_common.auth import Role
 from farm_common.schemas import ApiModel
 
-# Roles a user can give themselves; inspector and admin are granted by an admin only.
+# Roles a user can give themselves; admin is granted by an admin only.
 SELF_SERVICE_ROLES = frozenset({Role.FARMER, Role.CUSTOMER, Role.DELIVERY})
 
 _PHONE = re.compile(r"^\+[1-9]\d{9,14}$")

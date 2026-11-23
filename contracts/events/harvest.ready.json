@@ -2,22 +2,72 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "harvest.ready",
   "title": "harvest.ready",
-  "description": "Producer: land. A farmer marked the reservation crop ready for quality inspection.",
+  "description": "Producer: land. The farmer harvested the crop. The order service creates the harvest order at once (no quality gate) for harvestedQtyKg, or expectedQtyKg when it is empty, at the agreed price.",
   "type": "object",
-  "required": ["reservationId", "farmerId", "customerId", "cropId", "expectedQtyKg", "attempt"],
+  "required": [
+    "reservationId",
+    "farmerId",
+    "customerId",
+    "cropId",
+    "expectedQtyKg",
+    "attempt"
+  ],
   "properties": {
-    "reservationId": { "type": "string", "format": "uuid" },
-    "farmerId": { "type": "string", "format": "uuid" },
-    "customerId": { "type": "string", "format": "uuid" },
-    "cropId": { "type": "string" },
-    "expectedQtyKg": { "type": "number", "exclusiveMinimum": 0 },
-    "attempt": { "type": "integer", "minimum": 1 },
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    },
+    "expectedQtyKg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
     "plotCentroid": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "properties": {
-        "type": { "const": "Point" },
-        "coordinates": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "number" } }
+        "type": {
+          "const": "Point"
+        },
+        "coordinates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number"
+          }
+        }
       }
+    },
+    "harvestedQtyKg": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0
+    },
+    "total": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
     }
   },
   "additionalProperties": true

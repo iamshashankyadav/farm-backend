@@ -2,25 +2,25 @@
 
 How a reservation becomes money and an order (HLD section 12):
 
-    reservation.accepted   we remember the reservation: customer, farmer and the deposit
+    reservation.accepted   we remember the reservation: customer, farmer, deposit and agreed price
     POST /orders/payments/intent {kind: DEPOSIT, referenceId: <reservation id>}
                            the deposit is taken; `payment.succeeded` (kind DEPOSIT) tells land to
                            activate the reservation
-    harvest.ready          we remember the crop and where it is (the pickup point of the harvest)
-    quality.graded (HARVEST)
-        PASS                  -> a HARVEST order is created (status PLACED, no option yet)
-        FAIL + ACCEPT_LOWER_GRADE -> the same, at the lower-grade price
-        FAIL + REHARVEST / undecided -> no order; the farmer harvests again
+    harvest.ready          the farmer harvested: a HARVEST order is created at once (status PLACED,
+                           no option yet) for the harvested weight at the agreed price per kg, with
+                           the plot as its pickup point. There is no quality gate (removed in
+                           November 2026); the customer rates the order after delivery instead.
     POST /orders/harvest   the customer picks DELIVERY or BUYBACK
         DELIVERY -> the order goes to READY_FOR_DISPATCH (logistics pools it like any order);
                     when `delivery.completed` arrives the balance (total - deposit) is charged and
                     the order is COMPLETED (a deposit above the total is refunded instead)
-        BUYBACK  -> the farmer buys the harvest: the customer is credited (a REFUND payment) and
+        BUYBACK  -> the farmer sells the produce and credits the customer: the balance is charged
+                    first (the customer owns the whole harvest), then the customer is credited
+                    `buyback_rate` of its value (a REFUND payment) and the farmer is paid the rest;
                     the order is COMPLETED right away
 
-Harvest orders skip the packing and quality steps of a produce order (the harvest was graded before
-the order existed), so `order.packed` is never published for them: quality would open a second
-inspection. Every assumption made here is listed in docs/m1-assumptions.md under "Added by #24".
+Harvest orders skip packing (the farmer has already harvested), so `order.packed` is never published
+for them. Every assumption made here is listed in docs/m1-assumptions.md under "Added by #24".
 """
 
 import logging
@@ -88,14 +88,7 @@ def _crop_name(crop_id: str | None) -> str:
     return (crop_id or "crop").replace("_", " ").replace("-", " ").strip().title()
 
 
-def _grade_factor(grade: str | None, settings: OrderSettings) -> Decimal:
-    """Price factor of a lower grade: A is the agreed grade, B and C sell for less."""
-    return {"B": settings.grade_b_price_factor, "C": settings.grade_c_price_factor}.get(
-        (grade or "").upper(), Decimal(1)
-    )
-
-
-# --- consuming land and quality events ---------------------------------------------------------
+# --- consuming land events ---------------------------------------------------------------------
 
 
 async def on_reservation_accepted(session: AsyncSession, payload: dict[str, Any]) -> None:
@@ -130,8 +123,10 @@ async def on_reservation_accepted(session: AsyncSession, payload: dict[str, Any]
     row.updated_at = _now()
 
 
-async def on_harvest_ready(session: AsyncSession, payload: dict[str, Any]) -> None:
-    """Remember the crop and where it is: that point becomes the pickup of the harvest order."""
+async def on_harvest_ready(
+    session: AsyncSession, payload: dict[str, Any], settings: OrderSettings
+) -> None:
+    """The farmer marked the harvest ready: create the HARVEST order for the harvested weight."""
     reservation_id = _uuid(payload, "reservationId", "reservation_id")
     customer_id = _uuid(payload, "customerId", "customer_id")
     farmer_id = _uuid(payload, "farmerId", "farmer_id")
@@ -145,67 +140,40 @@ async def on_harvest_ready(session: AsyncSession, payload: dict[str, Any]) -> No
             customer_id=customer_id,
             farmer_id=farmer_id,
             deposit=Decimal(0),
+            deposit_paid=Decimal(0),
+            deposit_refunded=Decimal(0),
         )
         session.add(row)
-    if row.status in ("ORDERED", "CANCELLED"):
-        return
+    if row.order_id is not None or row.status in ("ORDERED", "CANCELLED"):
+        return  # a repeated event, or the reservation is gone
     row.status = "HARVEST_READY"
     row.crop_id = _pick(payload, "cropId", "crop_id") or row.crop_id
     row.expected_qty_kg = _decimal(_pick(payload, "expectedQtyKg", "expected_qty_kg")) or (
         row.expected_qty_kg
     )
+    if (total := _decimal(_pick(payload, "total"))) is not None and row.total is None:
+        row.total = _money(total)
     row.plot_location = _pick(payload, "plotCentroid", "plot_centroid") or row.plot_location
     row.updated_at = _now()
-
-
-async def on_harvest_graded(
-    session: AsyncSession, payload: dict[str, Any], settings: OrderSettings
-) -> None:
-    """quality.graded for a HARVEST: create the harvest order when the harvest may be sold."""
-    reservation_id = _uuid(payload, "subjectId", "subject_id", "reservationId")
-    row = (
-        await session.get(HarvestRow, reservation_id, with_for_update=True)
-        if reservation_id
-        else None
-    )
-    if row is None:
-        logger.warning("quality.graded for unknown reservation %s", reservation_id)
-        return
-    if row.order_id is not None or row.status == "CANCELLED":
-        return  # already handled (redelivery) or the reservation is gone
-    result = str(_pick(payload, "result") or "").upper()
-    resolution = str(_pick(payload, "resolution") or "").upper()
-    grade = str(_pick(payload, "grade") or "").upper() or None
-    row.quality_result, row.quality_grade = result or None, grade
-    row.updated_at = _now()
-    if result == "PASS":
-        factor = Decimal(1)
-    elif resolution == "ACCEPT_LOWER_GRADE":
-        factor = _grade_factor(grade, settings)
-    else:
-        row.status = "ACCEPTED"  # failed: the farmer harvests again (REHARVEST) or it is settled
-        return  # by hand; land sends a new harvest.ready
-    weight = _decimal(_pick(payload, "weightKg", "weight_kg"))
-    await _create_harvest_order(session, row, weight, factor, grade, settings)
+    weight = _decimal(_pick(payload, "harvestedQtyKg", "harvested_qty_kg"))
+    await _create_harvest_order(session, row, weight, settings)
 
 
 async def _create_harvest_order(
     session: AsyncSession,
     row: HarvestRow,
     weight: Decimal | None,
-    factor: Decimal,
-    grade: str | None,
     settings: OrderSettings,
 ) -> None:
-    """One HARVEST order with one line: the graded weight at the agreed price per kg."""
+    """One HARVEST order with one line: the harvested weight at the agreed price per kg."""
     qty = weight if weight and weight > 0 else (row.expected_qty_kg or Decimal(1))
     if row.total is not None and row.expected_qty_kg:
-        line_total = _money(row.total / row.expected_qty_kg * qty * factor)
+        line_total = _money(row.total / row.expected_qty_kg * qty)
     elif row.total is not None:
-        line_total = _money(row.total * factor)
+        line_total = _money(row.total)
     else:
-        # TODO(M1): land did not send the price of the crop; estimate it from the deposit
-        line_total = _money(row.deposit / settings.harvest_deposit_share * factor)
+        # land did not send the price of the crop; estimate it from the deposit
+        line_total = _money(row.deposit / settings.harvest_deposit_share)
         logger.warning(
             "Reservation %s has no total price, estimated %s", row.reservation_id, line_total
         )
@@ -257,9 +225,7 @@ async def _create_harvest_order(
             pickup_location=row.plot_location or UNKNOWN_LOCATION,
         )
     ]
-    note = "Harvest passed the quality check" + (f" (grade {grade})" if grade else "")
-    if factor < 1:
-        note += f", accepted at a lower grade price ({factor:.0%})"
+    note = f"Harvest ready: {qty.normalize():f} kg. Choose delivery or buy-back."
     order.events = [OrderEventRow(status=S.PLACED.value, note=note, occurred_at=now)]
     checkout.orders.append(order)
     session.add(checkout)
@@ -386,14 +352,18 @@ async def apply_webhook(
 
 
 async def choose_option(
-    session: AsyncSession, user: CurrentUser, body: HarvestOrderChoice, settings: OrderSettings
+    session: AsyncSession,
+    user: CurrentUser,
+    body: HarvestOrderChoice,
+    settings: OrderSettings,
+    gateway: PaymentGateway,
 ) -> OrderDetail:
-    """POST /orders/harvest: the customer decides what happens to the graded harvest."""
+    """POST /orders/harvest: the customer decides what happens to the harvest."""
     row = await session.get(HarvestRow, body.reservation_id, with_for_update=True)
     if row is None or str(row.customer_id) != user.id:
         raise NotFound("Reservation not found", code="RESERVATION_NOT_FOUND")
     if row.order_id is None:
-        raise Conflict("The harvest has not passed the quality check yet", code="HARVEST_NOT_READY")
+        raise Conflict("The harvest is not ready yet", code="HARVEST_NOT_READY")
     order = await _load_order(session, row.order_id)
     if order.harvest_option is not None:
         if order.harvest_option == body.option.value:
@@ -417,10 +387,9 @@ async def choose_option(
             .where(CheckoutRow.id == order.checkout_id)
             .values(delivery_fee=order.delivery_fee, total=order.total)
         )
-        # already graded, so packing and the quality step are only recorded; logistics gets the order
+        # the farmer has already harvested, so packing is only recorded; logistics gets the order
         await _transition(session, order, S.CONFIRMED, note=note)
         await _transition(session, order, S.PACKED, note="Harvest packed by the farmer")
-        await _transition(session, order, S.QC_PASSED, note="Graded before the order was created")
         await _transition(
             session,
             order,
@@ -429,6 +398,13 @@ async def choose_option(
             note="Ready for pickup",
         )
     else:
+        # The customer owns the whole harvest, so the balance is due first; then the farmer sells
+        # the produce and credits the customer `buyback_rate` of its value. The farmer keeps the rest.
+        if not await _charge_balance(session, order, row, gateway):
+            await session.rollback()  # nothing is decided: the customer can choose again
+            raise Conflict(
+                "The balance payment was declined; try again", code="BALANCE_PAYMENT_FAILED"
+            )
         credit = _money(order.subtotal * settings.buyback_rate)
         session.add(
             PaymentRow(
@@ -442,9 +418,21 @@ async def choose_option(
                 status=PaymentStatus.SUCCEEDED.value,
             )
         )
+        if order.farm_owner_id is not None and order.subtotal > credit:
+            session.add(
+                PaymentRow(
+                    id=uuid4(),
+                    customer_id=order.customer_id,
+                    kind=PaymentKind.PAYOUT.value,
+                    amount=order.subtotal - credit,
+                    currency=order.currency,
+                    reference_id=order.farm_owner_id,
+                    order_id=order.id,
+                    status=PaymentStatus.SUCCEEDED.value,
+                )
+            )
         await _transition(session, order, S.CONFIRMED, note=note)
         await _transition(session, order, S.PACKED)
-        await _transition(session, order, S.QC_PASSED)
         await _transition(session, order, S.READY_FOR_DISPATCH)
         await _transition(session, order, S.DELIVERED, note="Bought back by the farmer")
         await _transition(
@@ -455,6 +443,47 @@ async def choose_option(
 
 
 # --- completing a delivered harvest order ------------------------------------------------------
+
+
+async def _charge_balance(
+    session: AsyncSession, order: OrderRow, row: HarvestRow | None, gateway: PaymentGateway
+) -> bool:
+    """Charge what is left of the harvest price after the deposit (a BALANCE payment), or refund a
+    deposit larger than the price. Returns False when the gateway declined the balance."""
+    held = row.deposit_paid - row.deposit_refunded if row else Decimal(0)
+    balance = order.total - held
+    if balance > 0:
+        payment = PaymentRow(
+            id=uuid4(),
+            customer_id=order.customer_id,
+            kind=PaymentKind.BALANCE.value,
+            amount=balance,
+            currency=order.currency,
+            reference_id=order.reservation_id,
+            order_id=order.id,
+            status=PaymentStatus.PENDING.value,
+        )
+        session.add(payment)
+        if not await gateway.charge(balance, balance):
+            payment.status = PaymentStatus.FAILED.value
+            return False
+        payment.status = PaymentStatus.SUCCEEDED.value
+        publish_payment_succeeded(session, payment, order.reservation_id, [order.id])
+    elif balance < 0:
+        # the deposit was more than the price of what was harvested: give the difference back
+        session.add(
+            PaymentRow(
+                id=uuid4(),
+                customer_id=order.customer_id,
+                kind=PaymentKind.REFUND.value,
+                amount=-balance,
+                currency=order.currency,
+                reference_id=order.reservation_id,
+                order_id=order.id,
+                status=PaymentStatus.SUCCEEDED.value,
+            )
+        )
+    return True
 
 
 async def complete_delivery(session: AsyncSession, order_id: UUID, gateway: PaymentGateway) -> None:
@@ -481,42 +510,11 @@ async def complete_delivery(session: AsyncSession, order_id: UUID, gateway: Paym
         if order.reservation_id
         else None
     )
-    held = row.deposit_paid - row.deposit_refunded if row else Decimal(0)
-    balance = order.total - held
-    if balance > 0:
-        payment = PaymentRow(
-            id=uuid4(),
-            customer_id=order.customer_id,
-            kind=PaymentKind.BALANCE.value,
-            amount=balance,
-            currency=order.currency,
-            reference_id=order.reservation_id,
-            order_id=order.id,
-            status=PaymentStatus.PENDING.value,
-        )
-        session.add(payment)
-        if not await gateway.charge(balance, balance):
-            payment.status = PaymentStatus.FAILED.value
-            order.events.append(
-                OrderEventRow(
-                    order_id=order.id, status=S.DELIVERED.value, note="BALANCE_PAYMENT_FAILED"
-                )
-            )
-            return
-        payment.status = PaymentStatus.SUCCEEDED.value
-        publish_payment_succeeded(session, payment, order.reservation_id, [order.id])
-    elif balance < 0:
-        # the deposit was more than the (lower grade) price: give the difference back
-        session.add(
-            PaymentRow(
-                id=uuid4(),
-                customer_id=order.customer_id,
-                kind=PaymentKind.REFUND.value,
-                amount=-balance,
-                currency=order.currency,
-                reference_id=order.reservation_id,
-                order_id=order.id,
-                status=PaymentStatus.SUCCEEDED.value,
+    if not await _charge_balance(session, order, row, gateway):
+        order.events.append(
+            OrderEventRow(
+                order_id=order.id, status=S.DELIVERED.value, note="BALANCE_PAYMENT_FAILED"
             )
         )
+        return
     await _transition(session, order, S.COMPLETED, ev.ORDER_COMPLETED, note="Balance settled")

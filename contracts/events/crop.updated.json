@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "crop.updated",
+  "title": "crop.updated",
+  "description": "Producer: land. The farmer posted a crop update (stage, note, photos) on an active reservation.",
+  "type": "object",
+  "required": [
+    "reservationId",
+    "customerId",
+    "farmerId",
+    "cropId",
+    "updateId",
+    "stage"
+  ],
+  "properties": {
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    },
+    "updateId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "stage": {
+      "enum": [
+        "SOWN",
+        "GROWING",
+        "FLOWERING"
+      ]
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "photoCount": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": true
+}

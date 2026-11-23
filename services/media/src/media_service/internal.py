@@ -23,7 +23,7 @@ async def get_media_internal(
     session: AsyncSession = Depends(get_session),
     store: ObjectStore = Depends(get_store),
 ) -> MediaInternalOut:
-    """Full details incl. where the photo was taken, e.g. for quality or logistics."""
+    """Full details incl. where the photo was taken, e.g. for logistics."""
     media = await session.get(Media, media_id)
     if media is None:
         raise NotFound("Photo not found", code="MEDIA_NOT_FOUND")

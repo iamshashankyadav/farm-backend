@@ -21,7 +21,6 @@ class OwnerType(StrEnum):
     LISTING = "LISTING"  # catalog produce listing
     PLOT = "PLOT"  # land plot
     RESERVATION = "RESERVATION"  # land reservation (crop updates)
-    INSPECTION = "INSPECTION"  # quality inspection (not geo-checked yet)
     DELIVERY = "DELIVERY"  # logistics proof of delivery (not geo-checked yet)
     USER = "USER"  # profile / team photo (never geo-checked)
 
@@ -32,7 +31,6 @@ OWNER_SERVICES: dict[OwnerType, str] = {
     OwnerType.LISTING: "catalog",
     OwnerType.PLOT: "land",
     OwnerType.RESERVATION: "land",
-    OwnerType.INSPECTION: "quality",
     OwnerType.DELIVERY: "logistics",
     OwnerType.USER: "identity",
 }

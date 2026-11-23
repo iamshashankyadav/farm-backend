@@ -16,6 +16,7 @@ GET   /logistics/orders/{id}/track  Customer → live tracking
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import UTC, date, datetime
 from uuid import UUID
 
@@ -38,7 +39,7 @@ from logistics_service.db import (
     StopStatus,
     StopType,
 )
-from logistics_service.pooling import fetch_ready_orders, run_pooling
+from logistics_service.pooling import fetch_ready_orders, india_today, run_pooling
 from logistics_service.schemas import (
     DeliverIn,
     LocationPingIn,
@@ -61,7 +62,9 @@ router = APIRouter(tags=["logistics"])
 # ---------------------------------------------------------------------------
 
 
-def _stop_out(s: PoolStop) -> StopOut:
+def _stop_out(s: PoolStop, show_otp: bool = False) -> StopOut:
+    """A stop as the API shows it. The delivery code (`otp`) is shown only to the order's customer
+    (show_otp=True in the tracking route); partners and admins never see it."""
     from logistics_service.schemas import StopStatus as SStatus
     from logistics_service.schemas import StopType as SType
 
@@ -83,7 +86,7 @@ def _stop_out(s: PoolStop) -> StopOut:
         customer_name=s.customer_name,
         customer_phone=s.customer_phone,
         notes=s.notes,
-        otp=s.otp,
+        otp=s.otp if show_otp else None,
     )
 
 
@@ -141,7 +144,9 @@ def _pool_out(pool: DeliveryPool, stops: list[PoolStop]) -> PoolOut:
     summary="Run the pooling job for a given date",
 )
 async def run_pools(
-    pool_date: date = Query(default_factory=date.today, description="Date to pool orders for"),
+    pool_date: date = Query(
+        default_factory=india_today, description="Date to pool orders for (default: today in India)"
+    ),
     _user: CurrentUser = Depends(require_roles(Role.ADMIN)),
     session: AsyncSession = Depends(get_session),
     settings: LogisticsSettings = Depends(get_logistics_settings),
@@ -172,7 +177,9 @@ async def run_pools(
     summary="Saved pools for a given date",
 )
 async def list_pools(
-    pool_date: date = Query(default_factory=date.today, description="Date to list pools for"),
+    pool_date: date = Query(
+        default_factory=india_today, description="Date to list pools for (default: today in India)"
+    ),
     _user: CurrentUser = Depends(require_roles(Role.ADMIN)),
     session: AsyncSession = Depends(get_session),
 ) -> list[PoolOut]:
@@ -214,7 +221,7 @@ async def list_pools(
     summary="Today's assigned pool for the authenticated delivery partner",
 )
 async def my_route(
-    pool_date: date = Query(default_factory=date.today),
+    pool_date: date = Query(default_factory=india_today),
     user: CurrentUser = Depends(require_roles(Role.DELIVERY)),
     session: AsyncSession = Depends(get_session),
 ) -> PoolOut:
@@ -328,10 +335,22 @@ async def confirm_delivery(
             raise AppError("WRONG_STOP_TYPE", "This stop is not a DROP stop", 422)
         if stop.status == StopStatus.DONE:
             return _stop_out(stop)
+        waiting_pickup = await session.scalar(
+            select(PoolStop.id).where(
+                PoolStop.pool_id == stop.pool_id,
+                PoolStop.order_id == stop.order_id,
+                PoolStop.stop_type == StopType.PICKUP,
+                PoolStop.status != StopStatus.DONE,
+            )
+        )
+        if waiting_pickup is not None:
+            raise AppError(
+                "PICKUP_FIRST", "Collect this order at the farm before delivering it", 409
+            )
         if not body.otp.isdigit():
             raise AppError("INVALID_OTP", "OTP must be 4 digits", 422)
-        if stop.otp and body.otp != stop.otp:
-            raise AppError("INVALID_OTP", "Provided OTP does not match", 422)
+        if stop.otp and not secrets.compare_digest(body.otp, stop.otp):
+            raise AppError("INVALID_OTP", "That code does not match; ask the customer again", 422)
 
         stop.photo_media_id = body.photo_media_id
         stop.otp_verified = True
@@ -413,6 +432,8 @@ async def skip_stop(
     action_body = body or StopActionIn()
     async with session.begin():
         stop = await _get_stop(session, stop_id, user)
+        if stop.status == StopStatus.DONE:
+            raise AppError("STOP_DONE", "This stop is already done", 409)
         stop.status = StopStatus.SKIPPED
         if action_body.notes or action_body.reason:
             stop.notes = action_body.notes or action_body.reason
@@ -476,9 +497,11 @@ async def record_location(
 )
 async def track_order(
     order_id: UUID,
-    _user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> TrackOut:
+    """Where the order is, who brings it and the delivery code. Only the customer of the order
+    (and an admin) may see this; anyone else gets 404, as if the order had no route."""
     # Find the active DROP stop for this order
     result = await session.execute(
         select(PoolStop)
@@ -490,6 +513,9 @@ async def track_order(
         .limit(1)
     )
     stop = result.scalar_one_or_none()
+    is_customer = stop is not None and str(stop.customer_id) == user.id
+    if stop is not None and not (is_customer or user.has_any(Role.ADMIN)):
+        raise NotFound("No delivery for this order", code="ORDER_NOT_TRACKED")
 
     partner_id = None
     partner_name = partner_phone = None
@@ -531,7 +557,7 @@ async def track_order(
         order_id=order_id,
         pool_id=pool_id,
         status=order_status,
-        stop=_stop_out(stop) if stop else None,
+        stop=_stop_out(stop, show_otp=is_customer) if stop else None,
         partner_id=partner_id,
         partner_name=partner_name,
         partner_phone=partner_phone,

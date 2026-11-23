@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from farm_common.errors import AppError
 from land_service import routes as land_routes
-from land_service.consumers import on_quality_graded
+from land_service.consumers import on_harvest_order
 from land_service.db import Reservation
 from land_service.geo import polygon_to_db
 from land_service.schemas import Polygon, SeasonCreate
@@ -53,41 +53,36 @@ def test_reservations_track_harvest_attempts():
 
 
 @pytest.mark.asyncio
-async def test_stale_quality_report_does_not_advance_a_newer_harvest_attempt():
-    reservation = SimpleNamespace(status="HARVEST_READY", harvest_attempt=2)
+@pytest.mark.parametrize(
+    ("event_type", "before", "after"),
+    [
+        ("order.placed", "HARVEST_READY", "FULFILLING"),
+        ("order.completed", "FULFILLING", "COMPLETED"),
+        ("order.cancelled", "FULFILLING", "CANCELLED"),
+        ("order.placed", "COMPLETED", "COMPLETED"),  # a late event never moves it back
+    ],
+)
+async def test_harvest_orders_move_the_reservation(event_type, before, after):
+    reservation = SimpleNamespace(status=before)
     session = AsyncMock()
     session.get.return_value = reservation
     event = SimpleNamespace(
-        payload={
-            "subjectType": "HARVEST",
-            "subjectId": str(uuid4()),
-            "attempt": 1,
-            "result": "PASS",
-        }
+        type=event_type, payload={"orderType": "HARVEST", "reservationId": str(uuid4())}
     )
 
-    await on_quality_graded(session, event)
+    await on_harvest_order(session, event)
 
-    assert reservation.status == "HARVEST_READY"
+    assert reservation.status == after
 
 
 @pytest.mark.asyncio
-async def test_current_harvest_attempt_pass_moves_reservation_to_fulfilling():
-    reservation = SimpleNamespace(status="HARVEST_READY", harvest_attempt=2)
+async def test_produce_orders_do_not_concern_land():
     session = AsyncMock()
-    session.get.return_value = reservation
-    event = SimpleNamespace(
-        payload={
-            "subjectType": "HARVEST",
-            "subjectId": str(uuid4()),
-            "attempt": 2,
-            "result": "PASS",
-        }
-    )
+    event = SimpleNamespace(type="order.placed", payload={"orderType": "PRODUCE"})
 
-    await on_quality_graded(session, event)
+    await on_harvest_order(session, event)
 
-    assert reservation.status == "FULFILLING"
+    session.get.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -122,5 +117,11 @@ async def test_cancelling_reservation_publishes_event_for_deposit_refund(monkeyp
     assert reservation.status == "CANCELLED"
     assert len(published) == 1
     assert published[0].type == "reservation.cancelled"
-    assert published[0].payload == {"reservationId": str(reservation.id)}
+    assert published[0].payload == {
+        "reservationId": str(reservation.id),
+        "customerId": str(customer_id),
+        "farmerId": str(reservation.farmer_id),
+        "cropId": "tomato",
+        "cancelledBy": "customer",
+    }
     session.commit.assert_awaited_once()

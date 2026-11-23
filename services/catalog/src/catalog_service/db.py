@@ -91,7 +91,6 @@ class Listing(Base):
     unit: Mapped[str] = mapped_column(String(10))
     price_per_unit: Mapped[Decimal] = mapped_column(MONEY)
     harvest_date: Mapped[date] = mapped_column(Date)
-    grade: Mapped[str | None] = mapped_column(String(1), nullable=True)
     is_organic: Mapped[bool] = mapped_column(default=False)
     status: Mapped[str] = mapped_column(String(10), default="ACTIVE")
     pickup_location: Mapped[WKBElement] = mapped_column(

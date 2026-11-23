@@ -166,6 +166,8 @@ class PoolStop(Base):
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     customer_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     customer_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Whose order this stop is: only they (and admins) may track it and see its delivery code.
+    customer_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     notes: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 

@@ -101,7 +101,6 @@ def listing_fields(listing: Listing) -> dict[str, Any]:
         "unit": listing.unit,
         "price_per_unit": listing.price_per_unit,
         "harvest_date": listing.harvest_date,
-        "grade": listing.grade,
         "is_organic": listing.is_organic,
         "status": listing.status,
         "pickup_location": point_from_db(listing.pickup_location),
@@ -184,7 +183,6 @@ def listing_payload(listing: Listing) -> dict[str, Any]:
         "qtyAvailable": float(listing.qty_available),
         "unit": listing.unit,
         "pricePerUnit": float(listing.price_per_unit),
-        "grade": listing.grade,
         "isOrganic": listing.is_organic,
         "status": listing.status,
         "pickupLocation": point_from_db(listing.pickup_location).model_dump(),
@@ -218,7 +216,6 @@ async def _reserved_items(session: AsyncSession, order_id: UUID) -> list[Reserve
             unit=listing.unit,  # type: ignore[arg-type]
             qty=float(-movement.delta),
             unit_price=float(movement.unit_price or listing.price_per_unit),
-            grade=listing.grade,  # type: ignore[arg-type]
             pickup_location=point_from_db(listing.pickup_location),
         )
         for movement, listing in rows
@@ -428,19 +425,6 @@ async def add_farm_rating(session: AsyncSession, farm_id: UUID, score: int) -> N
         .where(Farm.id == farm_id)
         .values(rating_count=Farm.rating_count + 1, rating_sum=Farm.rating_sum + score)
     )
-
-
-async def set_grade(session: AsyncSession, listing_ids: list[UUID], grade: str) -> int:
-    changed = 0
-    for listing_id in sorted(set(listing_ids)):
-        listing = await session.get(Listing, listing_id)
-        if listing is None or listing.grade == grade:
-            continue
-        listing.grade = grade
-        listing.updated_at = now()
-        publish(session, "listing.updated", listing_payload(listing))
-        changed += 1
-    return changed
 
 
 # ---- geo reference (for media) -------------------------------------------------------------

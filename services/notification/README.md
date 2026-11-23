@@ -40,7 +40,8 @@ Listens on the RabbitMQ `farm.events` topic exchange and maps domain events into
 - `payment.succeeded`: `"Payment Succeeded"`
 - `reservation.accepted`: `"Plot Reservation Accepted"`
 - `harvest.ready`: `"Crop Ready for Harvest"`
-- `quality.graded`: `"Quality Inspection Passed"` / `"Harvest Inspection Graded"`
+- `reservation.requested` / `rejected` / `cancelled` / `expired` / `activated`, `crop.updated`, `farmer.verified`: the farmer or the customer, whoever has to act or wait
+- `order.placed` for a HARVEST order: "Your harvest is ready" (choose delivery or buy-back); the farmer gets nothing to pack
 - `pool.assigned`: `"Delivery Route Assigned"`
 
 ### 3. Push Delivery (`push.py`)

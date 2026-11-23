@@ -9,7 +9,7 @@ The owning service says where its thing is through an internal route returning
     PLOT, RESERVATION  -> land     GET /internal/geo/plot/{id}, /internal/geo/reservation/{id}
 
 The photo is compared with the boundary when there is one (0 m inside it), else with the point.
-Other owner types (inspection, delivery, user) are not checked: NOT_APPLICABLE.
+Other owner types (delivery, user) are not checked: NOT_APPLICABLE.
 """
 
 import json

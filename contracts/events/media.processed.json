@@ -23,7 +23,6 @@
       "enum": [
         "catalog",
         "land",
-        "quality",
         "logistics",
         "identity"
       ],
@@ -35,7 +34,6 @@
         "LISTING",
         "PLOT",
         "RESERVATION",
-        "INSPECTION",
         "DELIVERY",
         "USER"
       ]

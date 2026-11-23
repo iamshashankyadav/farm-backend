@@ -7,7 +7,7 @@ HOME = (21.19, 81.28)  # same as conftest.HOME
 
 @pytest.fixture
 async def spread(api, client):
-    """Listings 2 km, 6 km and 30 km north of HOME, with different crops, prices and grades."""
+    """Listings 2 km, 6 km and 30 km north of HOME, with different crops and prices."""
     near = await api.listing(
         await api.farm(HOME[0] + 2 * KM, HOME[1]), pricePerUnit=40, isOrganic=True
     )
@@ -52,22 +52,6 @@ async def test_filters(client, spread):
     assert ids(await search(client, min_price=30)) == [spread["near"]["id"]]
     assert ids(await search(client, organic="true")) == [spread["near"]["id"]]
     assert ids(await search(client, radius_km=50, sort="price"))[0] == spread["onion"]["id"]
-
-
-async def test_grade_filter_is_a_minimum(client, spread, session_factory):
-    async with session_factory() as session:
-        await session.execute(
-            text("UPDATE catalog.produce_listings SET grade = 'B' WHERE id = :id"),
-            {"id": spread["mid"]["id"]},
-        )
-        await session.execute(
-            text("UPDATE catalog.produce_listings SET grade = 'A' WHERE id = :id"),
-            {"id": spread["near"]["id"]},
-        )
-        await session.commit()
-
-    assert ids(await search(client, grade="A")) == [spread["near"]["id"]]
-    assert ids(await search(client, grade="B")) == [spread["near"]["id"], spread["mid"]["id"]]
 
 
 async def test_hides_paused_and_sold_out(api, client, spread):

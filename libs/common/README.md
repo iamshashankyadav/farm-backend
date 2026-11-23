@@ -75,13 +75,13 @@ asyncio.create_task(run_relay(session_factory, OutboxEvent, bus))
 ## Consuming events (idempotently)
 
 ```python
-async def on_quality_graded(event: Event) -> None:
+async def on_order_rated(event: Event) -> None:
     async with session_factory() as session, session.begin():
         if not await mark_processed(session, ProcessedEvent, event.event_id):
             return  # duplicate delivery
         ...apply the change...
 
-await bus.subscribe(["quality.graded"], on_quality_graded)
+await bus.subscribe(["order.rated"], on_order_rated)
 ```
 
 A handler that raises is retried 3 times, then the message moves to `<service>.main.dlq`.

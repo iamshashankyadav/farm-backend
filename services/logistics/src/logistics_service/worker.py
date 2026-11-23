@@ -15,7 +15,7 @@ from arq import cron
 from arq.connections import RedisSettings
 
 from farm_common.log import configure_logging
-from logistics_service.pooling import fetch_ready_orders, run_pooling
+from logistics_service.pooling import fetch_ready_orders, india_today, run_pooling
 from logistics_service.settings import LogisticsSettings, get_logistics_settings
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ async def run_pool_job(ctx: dict[str, Any], pool_date_iso: str | None = None) ->
     settings: LogisticsSettings = ctx["settings"]
     session_factory = ctx["session_factory"]
 
-    pool_date = date.fromisoformat(pool_date_iso) if pool_date_iso else date.today()
+    pool_date = date.fromisoformat(pool_date_iso) if pool_date_iso else india_today()
     orders = await fetch_ready_orders(pool_date, settings.order_service_url)
     pools = await run_pooling(pool_date, orders, session_factory, settings)
     logger.info("Nightly pooling for %s: %d pools created", pool_date, len(pools))
@@ -39,8 +39,9 @@ async def run_pool_job(ctx: dict[str, Any], pool_date_iso: str | None = None) ->
 
 
 async def nightly_pool(ctx: dict[str, Any]) -> int:
-    """Cron entry-point: pool today's orders."""
-    return await run_pool_job(ctx, date.today().isoformat())
+    """Cron entry-point (02:00 India time): pool the orders due today, India time. The container
+    clock is UTC, where it is still the day before."""
+    return await run_pool_job(ctx, india_today().isoformat())
 
 
 async def startup(ctx: dict[str, Any]) -> None:

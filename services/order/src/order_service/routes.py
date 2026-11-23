@@ -120,20 +120,24 @@ async def payment_webhook(
 @router.post(
     "/orders/harvest",
     response_model=OrderDetail,
-    summary="Customer: choose delivery or buy-back for a graded harvest",
+    summary="Customer: choose delivery or buy-back for a harvest",
     description=(
-        "The harvest order is created when the quality check passes (status PLACED, no option). "
-        "DELIVERY needs `deliveryAddress` (and optionally `deliveryDate`): the order becomes "
-        "READY_FOR_DISPATCH and is pooled like any order; the balance (total minus deposit) is "
-        "charged when it is delivered. BUYBACK: the farmer buys the harvest, the customer is "
-        "credited and the order is COMPLETED. Repeating the same choice returns the order."
+        "The harvest order is created when the farmer marks the harvest ready (status PLACED, no "
+        "option). DELIVERY needs `deliveryAddress` (and optionally `deliveryDate`): the order "
+        "becomes READY_FOR_DISPATCH and is pooled like any order; the balance (total minus "
+        "deposit) is charged when it is delivered. BUYBACK: the balance is charged now, the "
+        "farmer sells the harvest and credits the customer, and the order is COMPLETED. "
+        "Repeating the same choice returns the order."
     ),
     responses={
         **_AUTH_ERRORS,
         404: {"model": ErrorResponse, "description": "RESERVATION_NOT_FOUND"},
         409: {
             "model": ErrorResponse,
-            "description": "HARVEST_NOT_READY, HARVEST_OPTION_CHOSEN or HARVEST_ORDER_CLOSED",
+            "description": (
+                "HARVEST_NOT_READY, HARVEST_OPTION_CHOSEN, HARVEST_ORDER_CLOSED or "
+                "BALANCE_PAYMENT_FAILED"
+            ),
         },
     },
 )
@@ -142,8 +146,9 @@ async def choose_harvest_option(
     user: CurrentUser = Depends(_customer),
     session: AsyncSession = Depends(get_session),
     settings: OrderSettings = Depends(get_order_settings),
+    gateway: PaymentGateway = Depends(get_payment_gateway),
 ) -> OrderDetail:
-    return await harvest.choose_option(session, user, body, settings)
+    return await harvest.choose_option(session, user, body, settings, gateway)
 
 
 @router.post(

@@ -2,14 +2,54 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "reservation.accepted",
   "title": "reservation.accepted",
-  "description": "Producer: land. A farmer accepted a pending plot reservation. The customer pays the deposit through the order payment API.",
+  "description": "Producer: land. A farmer accepted a pending plot reservation and the agreement was written. The customer pays the deposit through the order payment API; the order service keeps the agreed price for the harvest order.",
   "type": "object",
-  "required": ["reservationId", "customerId", "farmerId", "deposit"],
+  "required": [
+    "reservationId",
+    "customerId",
+    "farmerId",
+    "cropId",
+    "deposit",
+    "total",
+    "expectedQtyKg",
+    "pricePerKg"
+  ],
   "properties": {
-    "reservationId": { "type": "string", "format": "uuid" },
-    "customerId": { "type": "string", "format": "uuid" },
-    "farmerId": { "type": "string", "format": "uuid" },
-    "deposit": { "type": "number", "minimum": 0 }
+    "reservationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "customerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "farmerId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "cropId": {
+      "type": "string"
+    },
+    "deposit": {
+      "type": "number",
+      "minimum": 0
+    },
+    "total": {
+      "type": "number",
+      "minimum": 0
+    },
+    "expectedQtyKg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "pricePerKg": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "agreementId": {
+      "type": "string",
+      "format": "uuid"
+    }
   },
   "additionalProperties": true
 }

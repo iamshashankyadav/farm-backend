@@ -4,7 +4,7 @@ from farm_common.settings import ServiceSettings
 
 
 class CatalogSettings(ServiceSettings):
-    # Publish events through the outbox relay and consume order/quality events (needs RabbitMQ).
+    # Publish events through the outbox relay and consume order events (needs RabbitMQ).
     events_enabled: bool = True
     db_pool_size: int = 10
 

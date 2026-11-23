@@ -14,7 +14,7 @@ from order_service import harvest
 from order_service.db import OrderRow, ProcessedEvent
 from order_service.payments import MockPaymentGateway, PaymentGateway
 from order_service.schemas import OrderStatus
-from order_service.service import _LOAD, _pick, _transition, _uuid, cancel_row
+from order_service.service import _LOAD, _pick, _transition
 from order_service.settings import OrderSettings, get_order_settings
 
 logger = logging.getLogger(__name__)
@@ -57,28 +57,6 @@ async def _advance(
         await _transition(session, order, new, event_type, note=note)
 
 
-async def _order_graded(session: AsyncSession, payload: dict[str, Any]) -> None:
-    """quality.graded for a packed produce order: PASS makes it ready for dispatch, FAIL cancels it
-    and refunds it (TODO(M1): assumed policy; the farmer could be asked to re-pack instead)."""
-    order_id = _uuid(payload, "orderId", "order_id", "subjectId", "subject_id")
-    if order_id is None:
-        return
-    if str(_pick(payload, "result") or "PASS").upper() == "FAIL":
-        order = await _load(session, order_id)
-        if order is None or order.status != S.PACKED:
-            logger.info("Skipping failed inspection of order %s", order_id)
-            return
-        await cancel_row(session, order, "system", "QUALITY_FAILED")
-        return
-    await _advance(
-        session,
-        order_id,
-        {S.PACKED},
-        [(S.QC_PASSED, None), (S.READY_FOR_DISPATCH, ev.ORDER_READY_FOR_DISPATCH)],
-        "Quality check passed",
-    )
-
-
 async def handle_event(
     session_factory: async_sessionmaker[AsyncSession],
     event: Event,
@@ -94,21 +72,11 @@ async def handle_event(
         if not await mark_processed(session, ProcessedEvent, event.event_id):
             return
         payload = event.payload
-        if event.type == ev.QUALITY_GRADED:
-            # TODO(M1): payload as in the quality contract (#12): subjectType ORDER or HARVEST,
-            # subjectId, result PASS or FAIL, resolution, grade, weightKg. Without subjectType it
-            # is an order (or {orderId}).
-            subject_type = _pick(payload, "subjectType", "subject_type") or "ORDER"
-            if subject_type == "HARVEST":
-                await harvest.on_harvest_graded(session, payload, settings)
-            elif subject_type == "ORDER":
-                await _order_graded(session, payload)
-            return  # LISTING and others concern catalog
         if event.type == ev.RESERVATION_ACCEPTED:
             await harvest.on_reservation_accepted(session, payload)
             return
         if event.type == ev.HARVEST_READY:
-            await harvest.on_harvest_ready(session, payload)
+            await harvest.on_harvest_ready(session, payload, settings)
             return
         if event.type == ev.RESERVATION_CANCELLED:
             await harvest.on_reservation_cancelled(session, payload)
