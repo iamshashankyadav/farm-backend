@@ -153,3 +153,26 @@ class TrackOut(ApiModel):
     partner_lng: float | None = Field(None, description="Latest GPS lng from location pings")
     partner_updated_at: datetime | None = None
     eta: datetime | None = None
+
+
+class OfferPlace(ApiModel):
+    lat: float
+    lng: float
+    address: str | None = None
+
+
+class OfferOut(ApiModel):
+    """A pool offered to the signed-in partner, still open (nobody has accepted it)."""
+
+    pool_id: UUID
+    pool_date: date
+    stop_count: int
+    pickup_count: int
+    drop_count: int
+    total_km: float | None = None
+    distance_km: float | None = Field(None, description="From the partner to the first pickup")
+    first_pickup: OfferPlace | None = None
+    offered_at: datetime
+    expires_at: datetime | None = Field(
+        None, description="Answer by this time; it stays open until someone accepts"
+    )

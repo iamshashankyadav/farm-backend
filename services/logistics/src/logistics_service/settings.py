@@ -21,6 +21,19 @@ class LogisticsSettings(ServiceSettings):
     # due that (India) day.
     pooling_cron_hour: int = 20
     pooling_cron_minute: int = 30
+    # How a new pool gets its delivery partner:
+    #   "offer"  - offer it to nearby online partners; the first to accept gets it (default)
+    #   "assign" - assign it straight to the least-loaded partner (the old behaviour)
+    dispatch_mode: str = "offer"
+    # Pool the orders as soon as a farmer packs one (order.ready_for_dispatch), not only nightly
+    pool_on_ready: bool = True
+    # Wait this long after a packed order before pooling, so orders packed together share a pool
+    pool_on_ready_delay_s: float = 5.0
+    # Offer to partners whose latest location ping is this recent and this close to the first pickup
+    offer_online_minutes: int = 30
+    offer_radius_km: float = 15.0
+    # Shown to partners as the time to answer; the pool stays open until someone accepts it
+    offer_ttl_s: int = 120
 
 
 @lru_cache

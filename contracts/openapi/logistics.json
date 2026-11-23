@@ -135,6 +135,123 @@
         "title": "LocationPingIn",
         "type": "object"
       },
+      "OfferOut": {
+        "description": "A pool offered to the signed-in partner, still open (nobody has accepted it).",
+        "properties": {
+          "distanceKm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the partner to the first pickup",
+            "title": "Distancekm"
+          },
+          "dropCount": {
+            "title": "Dropcount",
+            "type": "integer"
+          },
+          "expiresAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Answer by this time; it stays open until someone accepts",
+            "title": "Expiresat"
+          },
+          "firstPickup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferPlace"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offeredAt": {
+            "format": "date-time",
+            "title": "Offeredat",
+            "type": "string"
+          },
+          "pickupCount": {
+            "title": "Pickupcount",
+            "type": "integer"
+          },
+          "poolDate": {
+            "format": "date",
+            "title": "Pooldate",
+            "type": "string"
+          },
+          "poolId": {
+            "format": "uuid",
+            "title": "Poolid",
+            "type": "string"
+          },
+          "stopCount": {
+            "title": "Stopcount",
+            "type": "integer"
+          },
+          "totalKm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totalkm"
+          }
+        },
+        "required": [
+          "poolId",
+          "poolDate",
+          "stopCount",
+          "pickupCount",
+          "dropCount",
+          "offeredAt"
+        ],
+        "title": "OfferOut",
+        "type": "object"
+      },
+      "OfferPlace": {
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "lat": {
+            "title": "Lat",
+            "type": "number"
+          },
+          "lng": {
+            "title": "Lng",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lat",
+          "lng"
+        ],
+        "title": "OfferPlace",
+        "type": "object"
+      },
       "PickupIn": {
         "properties": {
           "collectedAt": {
@@ -786,6 +903,128 @@
           }
         ],
         "summary": "Today's assigned pool for the authenticated delivery partner",
+        "tags": [
+          "logistics"
+        ]
+      }
+    },
+    "/offers/mine": {
+      "get": {
+        "operationId": "my_offers_offers_mine_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OfferOut"
+                  },
+                  "title": "Response My Offers Offers Mine Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Open route offers for the signed-in delivery partner",
+        "tags": [
+          "logistics"
+        ]
+      }
+    },
+    "/offers/{pool_id}/accept": {
+      "post": {
+        "operationId": "accept_route_offer_offers__pool_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pool Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PoolOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "description": "POOL_TAKEN: another partner accepted first"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Take an offered route; the first partner to accept gets it",
+        "tags": [
+          "logistics"
+        ]
+      }
+    },
+    "/offers/{pool_id}/decline": {
+      "post": {
+        "operationId": "decline_route_offer_offers__pool_id__decline_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pool Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Turn an offered route down",
         "tags": [
           "logistics"
         ]

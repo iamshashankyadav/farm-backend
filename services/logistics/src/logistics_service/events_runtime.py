@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from farm_common.events import RabbitEventBus
 from farm_common.outbox import run_relay
-from logistics_service.consumers import BINDINGS, make_handler
+from logistics_service.consumers import BINDINGS, PoolTrigger, make_handler
 from logistics_service.database import get_session_factory
 from logistics_service.db import OutboxEvent
 from logistics_service.settings import get_logistics_settings
@@ -34,7 +34,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             bus = None
         if bus is not None:
             session_factory = get_session_factory()
-            await bus.subscribe(BINDINGS, make_handler(session_factory))
+            trigger = None
+            if settings.pool_on_ready:
+                from logistics_service.pooling import fetch_ready_orders, run_pooling
+
+                async def pool_day(day):  # type: ignore[no-untyped-def]
+                    orders = await fetch_ready_orders(day, settings.order_service_url)
+                    return await run_pooling(day, orders, session_factory, settings)
+
+                trigger = PoolTrigger(pool_day, settings.pool_on_ready_delay_s)
+            await bus.subscribe(BINDINGS, make_handler(session_factory, trigger))
             relay = asyncio.create_task(run_relay(session_factory, OutboxEvent, bus))
 
     try:
