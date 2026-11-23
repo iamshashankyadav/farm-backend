@@ -116,3 +116,102 @@ class TestGetRoute:
     async def test_single_waypoint_returns_none(self) -> None:
         result = await get_route([(21.1, 81.3)])
         assert result is None
+
+
+class TestGetRoadPath:
+    @staticmethod
+    def _client(response: MagicMock | Exception) -> MagicMock:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        if isinstance(response, Exception):
+            mock_client.get = AsyncMock(side_effect=response)
+        else:
+            mock_client.get = AsyncMock(return_value=response)
+        return mock_client
+
+    @pytest.mark.asyncio
+    async def test_routes_through_stops_in_the_given_order(self) -> None:
+        from logistics_service.routing import get_road_path
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {
+            "code": "Ok",
+            "routes": [
+                {
+                    "distance": 12000,
+                    "geometry": "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
+                    "legs": [{"duration": 600}, {"duration": 300}],
+                }
+            ],
+        }
+        client = self._client(resp)
+        with patch("httpx.AsyncClient", return_value=client):
+            result = await get_road_path(
+                [(21.1, 81.3), (21.2, 81.4), (21.3, 81.5)], osrm_base_url="http://mock-osrm"
+            )
+        assert result is not None
+        path, km, legs = result
+        assert len(path) == 3 and abs(km - 12.0) < 1e-9 and legs == [600, 300]
+        url = client.get.call_args.args[0]
+        assert "/route/v1/driving/81.3,21.1;81.4,21.2;81.5,21.3" in url
+
+    @pytest.mark.asyncio
+    async def test_unreachable_returns_none(self) -> None:
+        from logistics_service.routing import get_road_path
+
+        with patch("httpx.AsyncClient", return_value=self._client(Exception("down"))):
+            assert await get_road_path([(21.1, 81.3), (21.2, 81.4)]) is None
+
+    @pytest.mark.asyncio
+    async def test_no_route_returns_none(self) -> None:
+        from logistics_service.routing import get_road_path
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {"code": "NoRoute"}
+        with patch("httpx.AsyncClient", return_value=self._client(resp)):
+            assert await get_road_path([(21.1, 81.3), (21.2, 81.4)]) is None
+
+
+class TestApplyRoadPath:
+    @pytest.mark.asyncio
+    async def test_line_follows_pickups_then_drops_and_etas_come_from_legs(self) -> None:
+        from logistics_service.pooling import apply_road_path
+
+        cluster = [
+            {"order_id": "a", "hub_lat": 21.0, "hub_lng": 81.0, "drop_lat": 21.1, "drop_lng": 81.1},
+            {"order_id": "b", "hub_lat": 21.0, "hub_lng": 81.0, "drop_lat": 21.2, "drop_lng": 81.2},
+        ]
+        depart = datetime(2026, 11, 24, 6, 0, tzinfo=UTC)
+        trip = RouteResult(9.0, 1.0, [(0, 0), (1, 1)], [0, 1, 2], [depart, depart], {})
+        calls: list[list[tuple[float, float]]] = []
+
+        async def fake_path(points, osrm_base_url):  # type: ignore[no-untyped-def]
+            calls.append(points)
+            return [(21.0, 81.0), (21.2, 81.2)], 20.0, [0, 600, 600]
+
+        with patch("logistics_service.pooling.get_road_path", fake_path):
+            out = await apply_road_path(trip, cluster, depart, "http://x")
+
+        assert out is not None
+        # two pickups first, then the two drops
+        assert [p[0] for p in calls[0]] == [21.0, 21.0, 21.1, 21.2]
+        assert out.total_km == 20.0 and out.osrm_meta["stops_in_order"] is True
+        assert out.drop_etas is not None
+        assert (out.drop_etas["a"] - depart).total_seconds() == 600
+        assert (out.drop_etas["b"] - depart).total_seconds() == 1200
+
+    @pytest.mark.asyncio
+    async def test_failure_keeps_the_trip_route(self) -> None:
+        from logistics_service.pooling import apply_road_path
+
+        cluster = [
+            {"order_id": "a", "hub_lat": 21.0, "hub_lng": 81.0, "drop_lat": 21.1, "drop_lng": 81.1}
+        ]
+        depart = datetime(2026, 11, 24, 6, 0, tzinfo=UTC)
+        trip = RouteResult(9.0, 1.0, [], [0, 1], [depart], {})
+        with patch("logistics_service.pooling.get_road_path", AsyncMock(return_value=None)):
+            out = await apply_road_path(trip, cluster, depart, "http://x")
+        assert out is trip and "stops_in_order" not in out.osrm_meta

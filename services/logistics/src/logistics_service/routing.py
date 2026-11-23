@@ -86,6 +86,7 @@ class RouteResult:
         waypoint_order: list[int],  # original indices in the order returned by OSRM
         etas: list[datetime],  # ETA per waypoint in waypoint_order
         osrm_meta: dict[str, Any],
+        drop_etas: dict[str, datetime] | None = None,
     ) -> None:
         self.total_km = total_km
         self.km_saved = km_saved
@@ -93,6 +94,9 @@ class RouteResult:
         self.waypoint_order = waypoint_order
         self.etas = etas
         self.osrm_meta = osrm_meta
+        # order id -> arrival time at its drop, set once the road path through the real stop order
+        # is known (see apply_road_path)
+        self.drop_etas = drop_etas
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +178,47 @@ async def get_route(
         etas=etas[1:],  # skip the depart time (hub arrival = depart)
         osrm_meta={"distance_m": trip["distance"], "duration_s": trip["duration"]},
     )
+
+
+# ---------------------------------------------------------------------------
+# Road path through the stops in their real order
+# ---------------------------------------------------------------------------
+
+
+async def get_road_path(
+    stops: list[tuple[float, float]],  # (lat, lng) in the exact order the partner visits them
+    osrm_base_url: str = "http://router.project-osrm.org",
+    request_timeout: float = 10.0,
+) -> tuple[list[tuple[float, float]], float, list[float]] | None:
+    """Ask OSRM for the road geometry through `stops` in the given order (Route API).
+
+    Returns (road coords as (lat, lng), total km, duration in seconds of each leg), or None when
+    OSRM is unreachable or finds no road path. Unlike get_route it never reorders anything: the
+    drawn line has to pass the stops in the same order as the stop list.
+    """
+    if len(stops) < 2:
+        return None
+    coords_str = ";".join(f"{lng},{lat}" for lat, lng in stops)
+    url = (
+        f"{osrm_base_url}/route/v1/driving/{coords_str}"
+        f"?overview=full&steps=false&geometries=polyline&continue_straight=false"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data: dict[str, Any] = resp.json()
+    except Exception as exc:
+        logger.warning("OSRM road path request failed (%s); the app draws straight lines", exc)
+        return None
+    if data.get("code") != "Ok" or not data.get("routes"):
+        logger.warning("OSRM road path returned code=%s", data.get("code"))
+        return None
+    route = data["routes"][0]
+    path = _decode_polyline(route.get("geometry", ""))
+    if len(path) < 2:
+        return None
+    return path, route["distance"] / 1000.0, [leg.get("duration", 0) for leg in route["legs"]]
 
 
 # ---------------------------------------------------------------------------

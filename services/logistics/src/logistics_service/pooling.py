@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -41,7 +41,7 @@ from logistics_service.db import (
     StopType,
 )
 from logistics_service.dispatch import offer_pool
-from logistics_service.routing import RouteResult, get_route
+from logistics_service.routing import RouteResult, get_road_path, get_route
 from logistics_service.sequencing import PartnerCandidate, pick_partner, sequence_points
 from logistics_service.settings import LogisticsSettings
 
@@ -84,6 +84,60 @@ def _pool_payload(pool: DeliveryPool, stops: list[PoolStop]) -> dict[str, Any]:
     }
 
 
+def stop_order(cluster: list[Order], route: RouteResult | None) -> tuple[list[Order], list[int]]:
+    """The orders in drop order, and the indices (into that list) in pickup order.
+
+    Drops follow OSRM's trip order when there is one, else nearest-neighbour + 2-opt from the hub.
+    Every pickup comes before every drop.
+    """
+    hub = (cluster[0]["hub_lat"], cluster[0]["hub_lng"])
+    ordered = [
+        cluster[i] for i in sequence_points(hub, [(o["drop_lat"], o["drop_lng"]) for o in cluster])
+    ]
+    if route and route.waypoint_order:
+        # waypoint_order contains original indices into [hub, *stops]; index 0 is the hub
+        order_idx = [i - 1 for i in route.waypoint_order if i > 0]
+        if len(order_idx) == len(cluster):
+            ordered = [cluster[i] for i in order_idx]
+    pickup_order = sequence_points(hub, [(o["hub_lat"], o["hub_lng"]) for o in ordered])
+    return ordered, pickup_order
+
+
+async def apply_road_path(
+    route: RouteResult | None,
+    cluster: list[Order],
+    depart: datetime,
+    osrm_base_url: str,
+) -> RouteResult | None:
+    """Replace the route's line, length and ETAs by the road path through the real stops.
+
+    The trip call only sees hub -> drops, but the partner visits every pickup first, then every
+    drop, so the line it returned does not match the stops. Here OSRM routes through the stops in
+    exactly that order. On failure the route is returned unchanged.
+    """
+    if route is None or route.osrm_meta.get("fallback"):
+        return route
+    ordered, pickup_order = stop_order(cluster, route)
+    points = [(ordered[i]["hub_lat"], ordered[i]["hub_lng"]) for i in pickup_order]
+    points += [(o["drop_lat"], o["drop_lng"]) for o in ordered]
+    result = await get_road_path(points, osrm_base_url=osrm_base_url)
+    if result is None:
+        return route
+    path, total_km, legs = result
+
+    # arrival time at every stop; the drops are the last len(ordered) points
+    arrival = [depart]
+    for sec in legs:
+        arrival.append(arrival[-1] + timedelta(seconds=sec))
+    first_drop = len(ordered)
+    etas = {str(o["order_id"]): arrival[first_drop + j] for j, o in enumerate(ordered)}
+    route.linestring_coords = path
+    route.total_km = total_km
+    route.drop_etas = etas
+    route.osrm_meta = {**route.osrm_meta, "stops_in_order": True, "distance_m": total_km * 1000}
+    return route
+
+
 # ---------------------------------------------------------------------------
 # Single-pool persistence
 # ---------------------------------------------------------------------------
@@ -107,7 +161,10 @@ async def _persist_pool(
     pool_id = uuid4()
 
     # Build the route geometry
-    geom = _wkt_linestring(route.linestring_coords) if route else None
+    # Only a road path through the real stop order is kept; the straight-line fallback is not
+    # worth drawing (the app joins the stops itself).
+    on_road = bool(route and route.osrm_meta.get("stops_in_order"))
+    geom = _wkt_linestring(route.linestring_coords) if route and on_road else None
     total_km = route.total_km if route else None
     km_saved = route.km_saved if route else None
     osrm_meta = route.osrm_meta if route else None
@@ -125,22 +182,13 @@ async def _persist_pool(
     )
     session.add(pool)
 
-    # Reorder cluster by OSRM waypoint_order if available (skip index 0 = hub)
-    # Without OSRM's trip order: nearest-neighbour + 2-opt over the drop points, from the hub
-    hub = (cluster[0]["hub_lat"], cluster[0]["hub_lng"])
-    ordered = [
-        cluster[i] for i in sequence_points(hub, [(o["drop_lat"], o["drop_lng"]) for o in cluster])
-    ]
-    if route and route.waypoint_order:
-        # waypoint_order contains original indices into [hub, *stops]
-        # index 0 is hub; drop it and map back to cluster
-        stop_order = [i - 1 for i in route.waypoint_order if i > 0]
-        if len(stop_order) == len(cluster):
-            ordered = [cluster[i] for i in stop_order]
+    ordered, pickup_order = stop_order(cluster, route)
 
-    # ETA per order: route.etas follow route.waypoint_order (stops only, hub excluded)
+    # ETA per order: the road path's leg times when we have them, else the trip's
     eta_by_order: dict[str, datetime] = {}
-    if route and route.etas:
+    if route and route.drop_etas is not None:
+        eta_by_order = route.drop_etas
+    elif route and route.etas:
         stop_indices = [i - 1 for i in route.waypoint_order if i > 0]
         for pos, orig_idx in enumerate(stop_indices):
             if pos < len(route.etas) and 0 <= orig_idx < len(cluster):
@@ -176,7 +224,6 @@ async def _persist_pool(
 
     # We model each order as 2 stops: PICKUP at its farm/hub, DROP at the customer. All pickups
     # come first (each drop after its pickup), visiting the farms in a short order too.
-    pickup_order = sequence_points(hub, [(o["hub_lat"], o["hub_lng"]) for o in ordered])
     for i in pickup_order:
         pickup = _make_stop(ordered[i], StopType.PICKUP, seq, None)
         session.add(pickup)
@@ -315,6 +362,7 @@ async def _pool(
             depart_at=depart,
             osrm_base_url=settings.osrm_base_url,
         )
+        route = await apply_road_path(route, cluster, depart, settings.osrm_base_url)
 
         async with session_factory() as session, session.begin():
             if settings.dispatch_mode == "offer":

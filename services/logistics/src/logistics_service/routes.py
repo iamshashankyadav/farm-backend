@@ -24,6 +24,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from geoalchemy2.shape import to_shape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,7 +124,14 @@ async def _get_pool_with_stops(
     return pool, stops
 
 
-def _pool_out(pool: DeliveryPool, stops: list[PoolStop]) -> PoolOut:
+def _road_path(pool: DeliveryPool) -> list[tuple[float, float]] | None:
+    """The stored road line as [lat, lng] pairs, if it was computed through the real stop order."""
+    if pool.geom is None or not (pool.osrm_meta or {}).get("stops_in_order"):
+        return None
+    return [(lat, lng) for lng, lat in to_shape(pool.geom).coords]
+
+
+def _pool_out(pool: DeliveryPool, stops: list[PoolStop], with_path: bool = False) -> PoolOut:
     return PoolOut(
         id=pool.id,
         pool_date=pool.pool_date,
@@ -132,6 +140,7 @@ def _pool_out(pool: DeliveryPool, stops: list[PoolStop]) -> PoolOut:
         total_km=pool.total_km,
         km_saved=pool.km_saved,
         stops=[_stop_out(s) for s in stops],
+        route_path=_road_path(pool) if with_path else None,
         created_at=pool.created_at,
         assigned_at=pool.assigned_at,
     )
@@ -257,7 +266,7 @@ async def my_route(
         raise NotFound("No pool assigned for this date", code="NO_POOL")
 
     _, stops = await _get_pool_with_stops(session, pool.id)
-    return _pool_out(pool, stops)
+    return _pool_out(pool, stops, with_path=True)
 
 
 # ---------------------------------------------------------------------------
@@ -628,7 +637,7 @@ async def accept_route_offer(
     async with session.begin():
         pool = await accept_offer(session, pool_id, UUID(user.id))
     _, stops = await _get_pool_with_stops(session, pool.id)
-    return _pool_out(pool, stops)
+    return _pool_out(pool, stops, with_path=True)
 
 
 @router.post(
